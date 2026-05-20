@@ -6482,6 +6482,10 @@
                         safeText = safeText.replace(/&lt;b&gt;/gi, "<b>").replace(/&lt;\/b&gt;/gi, "</b>");
                         safeText = safeText.replace(/&lt;u&gt;/gi, "<u>").replace(/&lt;\/u&gt;/gi, "</u>");
                         safeText = restoreRubyTagsAfterEscaping(safeText);
+                        // --- CHO PHÉP CÂU HỎI NHIỀU DÒNG (XUẤT WORD CHUẨN) ---
+                        safeText = safeText.replace(/&lt;br\s*\/?&gt;/gi, "<br>");
+                        safeText = safeText.replace(/&lt;div[^&]*&gt;/gi, "<br>").replace(/&lt;\/div&gt;/gi, "");
+                        safeText = safeText.replace(/&lt;p[^&]*&gt;/gi, "<br>").replace(/&lt;\/p&gt;/gi, "");
                         safeText = safeText.replace(/&lt;span class="passage-question-blank"([^&]*)&gt;([\s\S]*?)&lt;\/span&gt;/gi, "<span class='passage-question-blank'>$2</span>");
 
                         html += "<div class='question-export-block'>";
@@ -6496,6 +6500,11 @@
                             let safeExp = stripFuriganaHtml(q.explanation).replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
                             safeExp = safeExp.replace(/&lt;b&gt;/gi, "<b>").replace(/&lt;\/b&gt;/gi, "</b>");
                             safeExp = safeExp.replace(/&lt;u&gt;/gi, "<u>").replace(/&lt;\/u&gt;/gi, "</u>");
+                            
+                            safeExp = safeExp.replace(/&lt;br\s*\/?&gt;/gi, "<br>");
+                            safeExp = safeExp.replace(/&lt;div[^&]*&gt;/gi, "<br>").replace(/&lt;\/div&gt;/gi, "");
+                            safeExp = safeExp.replace(/&lt;p[^&]*&gt;/gi, "<br>").replace(/&lt;\/p&gt;/gi, "");
+
                             html += "<p class='explanation-line'><b>Lời giải:</b> " + safeExp + "</p>";
                         }
 
@@ -6603,6 +6612,7 @@
             btnsHTML += `
                 <button class="action-btn btn-bulk" onclick="openBulkModal()">📝 Nhập Lời Giải Nhanh (hàng loạt)</button>
                 <button class="action-btn btn-ans-bulk" onclick="openBulkAnsModal()">✅ Nhập Đáp Án Nhanh (hàng loạt)</button>
+                <button class="action-btn" style="background: #f59e0b; color: white;" onclick="cleanUpOldData()">🧹 Dọn Rác & Lỗi Xuống Dòng (Data cũ)</button>
                 
                 <div style="display: flex; gap: 10px; margin-top: 10px;">
                     <div class="toggle-container" style="flex: 1; margin-top: 0;" title="Chỉ ẩn trên web, file Word vẫn có">
@@ -6678,21 +6688,101 @@
                 document.execCommand('insertText', false, text);
             }
         }
-        document.addEventListener('input', function(e) {
+
+        // ==========================================
+        // CHẶN RÁC HTML KHI COPY-PASTE VÀO Ô NHẬP LIỆU
+        // ==========================================
+        document.addEventListener('paste', function(e) {
             const target = e.target;
-            // Chỉ áp dụng cho các thẻ div contenteditable có chứa thuộc tính placeholder
-            if (target.isContentEditable && target.hasAttribute('placeholder')) {
-                const cleaned = cleanEditableHtml(target.innerHTML);
-                // Nếu nội dung chỉ còn lại các thẻ rác ẩn hoặc khoảng trắng -> Ép rỗng 100% và lưu trạng thái placeholder
-                if (cleaned === '') {
-                    target.innerHTML = '';
-                    if (target.classList.contains('editor-input')) {
-                        syncInputData(target);
-                        autoSave();
-                    }
-                }
+            
+            if (target.isContentEditable && !target.classList.contains('dokkai-content')) {
+                e.preventDefault(); 
+                
+                // Lấy chữ thuần túy
+                let text = (e.clipboardData || window.clipboardData).getData('text/plain');
+                
+                // Giữ lại dấu xuống dòng cố ý của cậu bằng cách biến nó thành thẻ <br> chuẩn
+                text = text.trim().replace(/\r?\n/g, '<br>');
+                
+                // Dùng insertHTML để dán vào
+                document.execCommand('insertHTML', false, text);
+                
+                syncInputData(target);
+                autoSave();
             }
         });
+
+        // ==========================================
+        // CHỨC NĂNG DỌN RÁC DATA CŨ & LỖI HIỂN THỊ <br>
+        // ==========================================
+        function cleanUpOldData() {
+            if (!confirm("Hệ thống sẽ quét và tự động dọn sạch các lỗi hiển thị thẻ <br>, &lt;br&gt;, và khoảng trắng/dòng trống dư thừa ở cuối các câu hỏi, đáp án, lời giải trong toàn bộ đề này. Cậu chắc chắn chứ?")) return;
+
+            showLoadingScreen('🧹 Đang dọn dẹp dữ liệu cũ...', 1000, () => {
+                examSections.forEach(sec => {
+                    // Dọn dẹp tiêu đề phần
+                    if (sec.title) sec.title = cleanHtmlGarbage(sec.title);
+
+                    (sec.groups || []).forEach(g => {
+                        (g.questions || []).forEach(q => {
+                            // Dọn dẹp câu hỏi, lời giải, ghi chú
+                            q.text = cleanHtmlGarbage(q.text);
+                            q.explanation = cleanHtmlGarbage(q.explanation);
+                            q.note = cleanHtmlGarbage(q.note);
+
+                            // Dọn dẹp các đáp án A, B, C, D
+                            if (q.options && Array.isArray(q.options)) {
+                                q.options = q.options.map(opt => cleanHtmlGarbage(opt));
+                            }
+                        });
+                    });
+                });
+
+                // Ép lưu dữ liệu sạch vào LocalStorage và vẽ lại giao diện lập tức
+                forceAutoSave();
+                initApp();
+                showRTEToast("✨ Đã dọn dẹp xong! Dữ liệu của cậu giờ đã sạch sẽ.");
+            });
+        }
+
+        function cleanHtmlGarbage(html) {
+            if (!html) return "";
+            let text = String(html);
+
+            // 1. Chuyển các thẻ HTML bị mã hóa dạng chữ (&lt;br&gt;, &lt;div&gt;) về thẻ thật để dễ xử lý
+            text = text.replace(/&lt;br\s*\/?&gt;/gi, '<br>')
+                       .replace(/&lt;\/?div[^&]*&gt;/gi, '<br>')
+                       .replace(/&lt;\/?p[^&]*&gt;/gi, '<br>');
+
+            // --- BƯỚC MỚI: LỘT VỎ CÁC THẺ SPAN, FONT RÁC ---
+            // Dùng DOM Parser để an toàn bóc tách các thẻ mang theo style từ Word/Web
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = text;
+            
+            // Tìm tất cả các thẻ span (nhưng CHỪA LẠI các ô trống điền từ của bài đọc hiểu) và thẻ font
+            tempDiv.querySelectorAll('span:not(.passage-question-blank):not(.section-title-question-blank), font').forEach(el => {
+                const frag = document.createDocumentFragment();
+                // Chuyển toàn bộ chữ bên trong ra ngoài
+                while (el.firstChild) { frag.appendChild(el.firstChild); }
+                // Xóa vỏ thẻ span/font đi, thế chỗ bằng chữ
+                el.replaceWith(frag);
+            });
+            text = tempDiv.innerHTML;
+            // ---------------------------------------------
+
+            // 2. Xóa các khoảng trắng HTML vô nghĩa
+            text = text.replace(/&nbsp;/g, ' ');
+
+            // 3. Vòng lặp gọt bỏ sạch sẽ mọi thẻ <br>, <div>, <p> và khoảng trắng nằm ở TẬN CÙNG đuôi chuỗi
+            let prev;
+            do {
+                prev = text;
+                text = text.replace(/(<br\s*\/?>|<\/?div[^>]*>|<\/?p[^>]*>|\s)+$/gi, '');
+            } while (prev !== text);
+
+            // 4. Trả về text đã được trim gọn gàng hai đầu
+            return text.trim();
+        }
     </script>
 </body>
 </html>
