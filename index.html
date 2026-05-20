@@ -1015,6 +1015,26 @@
             background: #f1f5f9;
             border-bottom: 1px solid #cbd5e1;
             color: #475569;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .bulk-exp-sub-label .ai-mini-actions {
+            float: none;
+            display: inline-flex;
+            flex-shrink: 0;
+        }
+        .bulk-group-headline small {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+        }
+        .bulk-group-headline .bulk-group-ai-actions {
+            float: none;
+            display: inline-flex;
+            gap: 5px;
+            margin-left: 4px;
         }
         .bulk-exp-pane.vocab-pane .bulk-exp-sub-label { background:#ede9fe; color:#4c1d95; border-bottom-color:#c4b5fd; }
         .bulk-exp-pane.note-pane .bulk-exp-sub-label { background:#e0f2fe; color:#075985; border-bottom-color:#bae6fd; }
@@ -1337,6 +1357,110 @@
             font-weight: 700;
         }
 
+        /* --- GEMINI AI STRICT JLPT ASSISTANT --- */
+        .ai-settings-panel {
+            margin-top: 12px;
+            padding: 12px;
+            border: 1px solid #ddd6fe;
+            border-radius: 12px;
+            background: linear-gradient(180deg, #faf5ff, #ffffff);
+        }
+        .ai-settings-title {
+            font-size: 13px;
+            font-weight: 900;
+            color: #6d28d9;
+            margin-bottom: 8px;
+        }
+        .ai-settings-desc {
+            font-size: 11px;
+            font-weight: 700;
+            color: #64748b;
+            line-height: 1.45;
+            margin-bottom: 8px;
+        }
+        .ai-key-row {
+            display: flex;
+            gap: 6px;
+        }
+        .ai-key-row input {
+            flex: 1;
+            min-width: 0;
+            padding: 8px 10px;
+            border: 1px solid #c4b5fd;
+            border-radius: 8px;
+            outline: none;
+            font-size: 12px;
+            font-weight: 700;
+        }
+        .ai-key-row button,
+        .ai-mini-btn,
+        .ai-group-btn {
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 900;
+            transition: .2s;
+        }
+        .ai-key-row button {
+            padding: 8px 10px;
+            background: #7c3aed;
+            color: #fff;
+            font-size: 12px;
+        }
+        .ai-key-row button:hover,
+        .ai-mini-btn:hover,
+        .ai-group-btn:hover {
+            filter: brightness(1.08);
+            transform: translateY(-1px);
+        }
+        .ai-model-status {
+            margin-top: 8px;
+            font-size: 11px;
+            font-weight: 800;
+            color: #6d28d9;
+            background: #f3e8ff;
+            border: 1px solid #ddd6fe;
+            border-radius: 999px;
+            padding: 5px 8px;
+            display: inline-block;
+        }
+        .ai-mini-actions {
+            float: right;
+            display: inline-flex;
+            gap: 5px;
+        }
+        .ai-mini-btn {
+            padding: 4px 7px;
+            font-size: 10px;
+            background: #8b5cf6;
+            color: white;
+        }
+        .ai-mini-btn.grammar {
+            background: #0284c7;
+        }
+        .ai-group-btn {
+            padding: 6px 9px !important;
+            font-size: 11px !important;
+            background: #8b5cf6 !important;
+            color: white !important;
+            border-color: #8b5cf6 !important;
+        }
+        .ai-group-btn.grammar {
+            background: #0284c7 !important;
+            border-color: #0284c7 !important;
+        }
+        .ai-generated-block {
+            margin-top: 4px;
+            padding: 6px 8px;
+            border-radius: 8px;
+            background: rgba(139, 92, 246, 0.08);
+            border-left: 4px solid #8b5cf6;
+        }
+        .question-note .ai-generated-block,
+        .bulk-note-input .ai-generated-block {
+            background: rgba(2, 132, 199, 0.08);
+            border-left-color: #0284c7;
+        }
     </style>
 </head>
 <body>
@@ -1459,6 +1583,24 @@
         </div>
     </div>
 
+    <div id="ai-import-modal" class="modal-overlay">
+        <div class="modal-content" style="width: 700px;">
+            <h3 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center; color: #8b5cf6;">
+                <span>✨ Trợ Lý Nhập Liệu Gemini AI</span>
+            </h3>
+            <div style="font-size: 13px; color: #4c1d95; background: #f5f3ff; padding: 10px; border-radius: 6px; margin-bottom: 15px; border: 1px solid #c4b5fd;">
+                💡 <b>Hướng dẫn:</b> Tạo đề từ Gemini theo cấu trúc Prompt chuẩn, copy toàn bộ nội dung câu hỏi rồi dán vào khung bên dưới. Hệ thống sẽ tự phân tích và nạp trực tiếp vào <b>Mondai hiện tại</b> cậu đang mở!
+            </div>
+            
+            <textarea id="ai-import-textarea" placeholder="Dán nội dung câu hỏi từ Gemini AI vào đây...&#10;[CÂU] 昨日は <b><u>海岸</u></b> へ行きました。&#10;A. かいがん&#10;B. うみ..."></textarea>
+            
+            <div style="display: flex; gap: 10px; justify-content: flex-end; padding-top: 15px; border-top: 1px solid var(--border-color);">
+                <button class="action-btn" style="background: #e2e8f0; color: #334155;" onclick="closeModals()">Hủy</button>
+                <button class="action-btn" style="background: #8b5cf6; color: white;" onclick="executeAIParser()">🚀 Tự Động Nhập Liệu</button>
+            </div>
+        </div>
+    </div>
+
     <div id="bulk-ans-modal" class="modal-overlay">
         <div class="modal-content" style="width: 750px;"> <h3 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
                 <span>✅ Bảng Nhập Đáp Án Siêu Tốc</span>
@@ -1577,6 +1719,1277 @@
         let examSections = [];
         let globalActiveFocus = null; // Theo dõi tọa độ câu hỏi đang được ghim sáng
         let currentPassageBlankForSpace = null; // Ô trống đang được chọn để bấm Space xoay vòng 19 → 19-a → 19-b → 20
+        
+        // ==========================================
+        // GEMINI KEY CENTER + AI JLPT STRICT MODE
+        // Tự nhập key, tự dò model, tự chọn model tương thích,
+        // tự fallback khi quota/runout/rate-limit.
+        // ==========================================
+        const GEMINI_DEFAULT_PRIORITY = [
+            'gemini-3.1-flash-lite',
+            'gemini-3.5-flash',
+            'gemini-2.5-flash-lite',
+            'gemini-2.5-flash',
+            'gemini-2.0-flash-lite',
+            'gemini-2.0-flash',
+            'gemini-1.5-flash'
+        ];
+
+        const GEMINI_MODEL_COOLDOWN_MS = 2 * 60 * 1000;
+        const GEMINI_MAX_RETRIES_PER_MODEL = 1;
+
+        function getGeminiApiKey() {
+            return localStorage.getItem('gemini_api_key_jlpt') || '';
+        }
+
+        function getGeminiModelRoute() {
+            try {
+                return JSON.parse(localStorage.getItem('gemini_model_route_jlpt') || '[]');
+            } catch {
+                return [];
+            }
+        }
+
+        function setGeminiModelRoute(route) {
+            localStorage.setItem('gemini_model_route_jlpt', JSON.stringify(route || []));
+        }
+
+        function getGeminiActiveModel() {
+            return localStorage.getItem('gemini_active_model_jlpt') || '';
+        }
+
+        function setGeminiActiveModel(model) {
+            if (model) localStorage.setItem('gemini_active_model_jlpt', model);
+        }
+
+        function getGeminiCooldowns() {
+            try {
+                return JSON.parse(localStorage.getItem('gemini_model_cooldowns_jlpt') || '{}');
+            } catch {
+                return {};
+            }
+        }
+
+        function setGeminiCooldown(model, reason = '') {
+            const cooldowns = getGeminiCooldowns();
+            cooldowns[model] = {
+                until: Date.now() + GEMINI_MODEL_COOLDOWN_MS,
+                reason
+            };
+            localStorage.setItem('gemini_model_cooldowns_jlpt', JSON.stringify(cooldowns));
+        }
+
+        function isGeminiModelCoolingDown(model) {
+            const cooldowns = getGeminiCooldowns();
+            const item = cooldowns[model];
+            if (!item) return false;
+
+            if (Date.now() > item.until) {
+                delete cooldowns[model];
+                localStorage.setItem('gemini_model_cooldowns_jlpt', JSON.stringify(cooldowns));
+                return false;
+            }
+
+            return true;
+        }
+
+        function setGeminiStatus(text) {
+            const el = document.getElementById('gemini-ai-status');
+            if (el) el.textContent = text || 'Sẵn sàng';
+        }
+
+        function maskGeminiKey(key) {
+            if (!key) return '';
+            if (key.length <= 10) return '••••••';
+            return key.slice(0, 6) + '••••••••' + key.slice(-4);
+        }
+
+        function getGeminiSettingsPanelHtml() {
+            const savedKey = getGeminiApiKey();
+            const route = getGeminiModelRoute();
+            const activeModel = getGeminiActiveModel();
+
+            return `
+                <div class="ai-settings-panel">
+                    <div class="ai-settings-title">✨ Gemini Key Center</div>
+                    <div class="ai-settings-desc">
+                        Dán key Google AI Studio vào đây. Web sẽ tự dò model tương thích, tự kích hoạt model dùng được,
+                        và tự đổi model nếu bị quota / runout / rate-limit.
+                        <br><b>Lưu ý:</b> Nếu đẩy web công khai lên GitHub Pages, key có thể bị lộ.
+                    </div>
+
+                    <div class="ai-key-row">
+                        <input id="gemini-api-key-input" type="password" value="${escapeHtmlAttr(savedKey)}" placeholder="Dán Gemini API key ở đây...">
+                        <button type="button" onclick="saveGeminiApiKeyFromInput()">Lưu + dò model</button>
+                    </div>
+
+                    <div style="display:flex; gap:6px; margin-top:8px;">
+                        <button type="button" class="ai-group-btn" onclick="refreshGeminiModelsFromKey()">🔁 Dò lại model</button>
+                        <button type="button" class="ai-group-btn grammar" onclick="testGeminiActiveModel()">🧪 Test model</button>
+                    </div>
+
+                    <div class="ai-model-status" id="gemini-ai-status">
+                        ${savedKey ? `Key: ${maskGeminiKey(savedKey)} · Model: ${activeModel || route[0] || 'chưa dò'}` : 'Chưa nhập Gemini API key'}
+                    </div>
+
+                    <div id="gemini-model-route-view" style="margin-top:7px; font-size:11px; color:#64748b; line-height:1.45; font-weight:700;">
+                        ${route.length ? `Route: ${route.join(' → ')}` : 'Route model: chưa có. Bấm “Lưu + dò model”.'}
+                    </div>
+                </div>
+            `;
+        }
+
+        async function saveGeminiApiKeyFromInput() {
+            const input = document.getElementById('gemini-api-key-input');
+            if (!input) return;
+
+            const key = input.value.trim();
+            if (!key) {
+                alert('Cậu chưa nhập Gemini API key.');
+                return;
+            }
+
+            localStorage.setItem('gemini_api_key_jlpt', key);
+            await refreshGeminiModelsFromKey();
+        }
+
+        function normalizeGeminiModelName(name) {
+            return String(name || '').replace(/^models\//, '').trim();
+        }
+
+        function scoreGeminiModel(modelName, taskType = 'normal') {
+            const name = normalizeGeminiModelName(modelName).toLowerCase();
+            let score = 0;
+
+            if (name.includes('gemini')) score += 1000;
+
+            if (name.includes('flash-lite')) score += 700;
+            else if (name.includes('flash')) score += 650;
+            else if (name.includes('pro')) score += 250;
+
+            if (name.includes('3.5')) score += 80;
+            if (name.includes('3.1')) score += 70;
+            if (name.includes('2.5')) score += 60;
+            if (name.includes('2.0')) score += 40;
+            if (name.includes('1.5')) score += 10;
+
+            if (name.includes('embedding')) score -= 9999;
+            if (name.includes('imagen')) score -= 9999;
+            if (name.includes('veo')) score -= 9999;
+            if (name.includes('tts')) score -= 9999;
+            if (name.includes('aqa')) score -= 9999;
+
+            if (taskType === 'long') {
+                if (name.includes('flash') && !name.includes('lite')) score += 120;
+                if (name.includes('pro')) score += 80;
+            }
+
+            return score;
+        }
+
+        async function listGeminiModelsByKey(apiKey) {
+            let allModels = [];
+            let pageToken = '';
+
+            for (let i = 0; i < 5; i++) {
+                const url = new URL('https://generativelanguage.googleapis.com/v1beta/models');
+                url.searchParams.set('key', apiKey);
+                url.searchParams.set('pageSize', '1000');
+                if (pageToken) url.searchParams.set('pageToken', pageToken);
+
+                const res = await fetch(url.toString(), { method: 'GET' });
+                const text = await res.text();
+
+                if (!res.ok) {
+                    throw new Error(`Không dò được model. HTTP ${res.status}: ${text.slice(0, 220)}`);
+                }
+
+                const data = JSON.parse(text);
+                allModels = allModels.concat(data.models || []);
+
+                if (!data.nextPageToken) break;
+                pageToken = data.nextPageToken;
+            }
+
+            return allModels;
+        }
+
+        function buildCompatibleGeminiRoute(models, taskType = 'normal') {
+            const compatible = (models || [])
+                .filter(m => {
+                    const methods = m.supportedGenerationMethods || [];
+                    return methods.includes('generateContent') || methods.includes('GenerateContent');
+                })
+                .map(m => normalizeGeminiModelName(m.name || m.baseModelId || m.displayName))
+                .filter(Boolean)
+                .filter(name => scoreGeminiModel(name, taskType) > 0);
+
+            const unique = Array.from(new Set(compatible));
+
+            unique.sort((a, b) => {
+                const fixedA = GEMINI_DEFAULT_PRIORITY.indexOf(a);
+                const fixedB = GEMINI_DEFAULT_PRIORITY.indexOf(b);
+
+                if (fixedA !== -1 && fixedB !== -1) return fixedA - fixedB;
+                if (fixedA !== -1) return -1;
+                if (fixedB !== -1) return 1;
+
+                return scoreGeminiModel(b, taskType) - scoreGeminiModel(a, taskType);
+            });
+
+            return Array.from(new Set(unique.concat(GEMINI_DEFAULT_PRIORITY)));
+        }
+
+        async function refreshGeminiModelsFromKey() {
+            const apiKey = getGeminiApiKey();
+
+            if (!apiKey) {
+                alert('Cậu chưa nhập Gemini API key.');
+                return;
+            }
+
+            setGeminiStatus('Đang dò model tương thích từ key...');
+
+            try {
+                const models = await listGeminiModelsByKey(apiKey);
+                const route = buildCompatibleGeminiRoute(models, 'normal');
+
+                if (!route.length) {
+                    throw new Error('Key này không có model nào hỗ trợ generateContent.');
+                }
+
+                setGeminiModelRoute(route);
+                setGeminiActiveModel(route[0]);
+
+                const routeView = document.getElementById('gemini-model-route-view');
+                if (routeView) routeView.textContent = 'Route: ' + route.join(' → ');
+
+                setGeminiStatus(`Đã kích hoạt model: ${route[0]} · Có ${route.length} model fallback`);
+                showRTEToast('Đã dò xong model Gemini tương thích.');
+            } catch (err) {
+                console.error(err);
+                setGeminiStatus('Lỗi dò model: ' + (err.message || err));
+                alert('Gemini key/model lỗi: ' + (err.message || err));
+            }
+        }
+
+        function getGeminiRouteForTask(taskType = 'normal') {
+            const route = getGeminiModelRoute();
+            const active = getGeminiActiveModel();
+
+            let finalRoute = [];
+
+            if (active) finalRoute.push(active);
+            finalRoute = finalRoute.concat(route.length ? route : GEMINI_DEFAULT_PRIORITY);
+            finalRoute = finalRoute.concat(GEMINI_DEFAULT_PRIORITY);
+
+            finalRoute = Array.from(new Set(finalRoute.map(normalizeGeminiModelName).filter(Boolean)));
+
+            finalRoute = finalRoute
+                .filter(model => !isGeminiModelCoolingDown(model))
+                .sort((a, b) => scoreGeminiModel(b, taskType) - scoreGeminiModel(a, taskType));
+
+            return finalRoute.length ? finalRoute : GEMINI_DEFAULT_PRIORITY;
+        }
+
+        function isGeminiQuotaLikeError(status, text) {
+            const msg = String(text || '').toLowerCase();
+            return (
+                status === 429 ||
+                status === 503 ||
+                msg.includes('resource_exhausted') ||
+                msg.includes('quota') ||
+                msg.includes('rate limit') ||
+                msg.includes('too many requests') ||
+                msg.includes('overloaded') ||
+                msg.includes('unavailable') ||
+                msg.includes('runout')
+            );
+        }
+
+        function getGeminiTextFromResponse(data) {
+            return data?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('\n') || '';
+        }
+
+        async function callGeminiGenerateContent(model, promptText, apiKey) {
+            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-goog-api-key': apiKey
+                },
+                body: JSON.stringify({
+                    contents: [
+                        {
+                            role: 'user',
+                            parts: [{ text: promptText }]
+                        }
+                    ],
+                    generationConfig: {
+                        temperature: 0.05,
+                        topP: 0.2,
+                        responseMimeType: 'application/json'
+                    }
+                })
+            });
+
+            const raw = await res.text();
+
+            if (!res.ok) {
+                const err = new Error(`Model ${model} lỗi HTTP ${res.status}: ${raw.slice(0, 240)}`);
+                err.status = res.status;
+                err.raw = raw;
+                throw err;
+            }
+
+            const data = JSON.parse(raw);
+            return getGeminiTextFromResponse(data);
+        }
+
+        function parseGeminiJsonText(text) {
+            let cleaned = String(text || '').trim();
+            cleaned = cleaned.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
+
+            try {
+                return JSON.parse(cleaned);
+            } catch (err) {
+                const first = cleaned.indexOf('{');
+                const last = cleaned.lastIndexOf('}');
+                if (first !== -1 && last !== -1 && last > first) {
+                    return JSON.parse(cleaned.slice(first, last + 1));
+                }
+                throw err;
+            }
+        }
+
+        async function callGeminiStrictJSON(promptText, taskType = 'normal') {
+            const apiKey = getGeminiApiKey();
+
+            if (!apiKey) {
+                alert('Cậu chưa nhập Gemini API key. Dán key vào Gemini Key Center trước nhé.');
+                throw new Error('Missing Gemini API key');
+            }
+
+            const route = getGeminiRouteForTask(taskType);
+            let lastError = null;
+
+            for (const model of route) {
+                for (let attempt = 0; attempt <= GEMINI_MAX_RETRIES_PER_MODEL; attempt++) {
+                    try {
+                        setGeminiStatus(`Đang chạy: ${model}${attempt ? ` · thử lại ${attempt}` : ''}`);
+
+                        const text = await callGeminiGenerateContent(model, promptText, apiKey);
+                        const json = parseGeminiJsonText(text);
+
+                        setGeminiActiveModel(model);
+                        setGeminiStatus(`Đã chạy thành công bằng model: ${model}`);
+                        return json;
+                    } catch (err) {
+                        lastError = err;
+
+                        const status = err.status || 0;
+                        const raw = err.raw || err.message || '';
+
+                        if (status === 400 || status === 401 || status === 403) {
+                            setGeminiStatus('Key/API bị lỗi quyền hoặc request sai.');
+                            throw err;
+                        }
+
+                        if (isGeminiQuotaLikeError(status, raw)) {
+                            setGeminiCooldown(model, raw.slice(0, 120));
+                            setGeminiStatus(`Model ${model} đang quá tải/quota. Tự chuyển model khác...`);
+                            break;
+                        }
+
+                        break;
+                    }
+                }
+            }
+
+            setGeminiStatus('Tất cả model hiện tại đều lỗi/quota. Thử lại sau hoặc đổi key.');
+            throw new Error(lastError?.message || 'Gemini API lỗi.');
+        }
+
+        async function testGeminiActiveModel() {
+            const apiKey = getGeminiApiKey();
+
+            if (!apiKey) {
+                alert('Cậu chưa nhập Gemini API key.');
+                return;
+            }
+
+            const prompt = `Trả về đúng JSON này, không thêm chữ khác: {"ok":true,"message":"ready"}`;
+
+            showLoadingScreen('🧪 Đang test Gemini model...', 250, async () => {
+                try {
+                    const json = await callGeminiStrictJSON(prompt, 'normal');
+
+                    if (json && json.ok) {
+                        showRTEToast('Gemini model đang chạy ổn.');
+                    } else {
+                        alert('Model có phản hồi nhưng JSON chưa đúng chuẩn.');
+                    }
+                } catch (err) {
+                    alert('Test Gemini lỗi: ' + (err.message || err));
+                }
+            });
+        }
+
+        function getPlainTextForAI(html) {
+            const holder = document.createElement('div');
+            holder.innerHTML = stripFuriganaHtml(html || '')
+                .replace(/<br\s*\/?>/gi, '\n')
+                .replace(/<\/(div|p|li|tr|h1|h2|h3)>/gi, '\n');
+
+            return (holder.textContent || '')
+                .replace(/\u00a0/g, ' ')
+                .replace(/\s+\n/g, '\n')
+                .replace(/\n\s+/g, '\n')
+                .replace(/[ \t]+/g, ' ')
+                .trim();
+        }
+
+        function buildQuestionAIContext(sIdx, gIdx, qIdx, includePassage = false) {
+            const sec = examSections[sIdx];
+            const group = sec?.groups?.[gIdx];
+            const q = group?.questions?.[qIdx];
+
+            if (!sec || !group || !q) return '';
+
+            const opts = (q.options || ['', '', '', '']).map((opt, idx) => {
+                return `${['A', 'B', 'C', 'D'][idx]}. ${getPlainTextForAI(opt)}`;
+            }).join('\n');
+
+            const passageText = includePassage ? getPlainTextForAI(group.passageHTML || '') : '';
+
+            return [
+                `PHẦN: ${parentLabels[sec.parentType] || sec.parentType || ''}`,
+                `MONDAI: ${getPlainTextForAI(sec.title || '')}`,
+                passageText ? `ĐOẠN ĐỌC:\n${passageText}` : '',
+                `CÂU HỎI:\n${getPlainTextForAI(q.text || '')}`,
+                `ĐÁP ÁN A/B/C/D:\n${opts}`
+            ].filter(Boolean).join('\n\n');
+        }
+
+        function buildGroupAIContext(sIdx, gIdx) {
+            const sec = examSections[sIdx];
+            const group = sec?.groups?.[gIdx];
+
+            if (!sec || !group) return '';
+
+            const questions = (group.questions || []).map((q, idx) => {
+                const opts = (q.options || ['', '', '', '']).map((opt, oIdx) => {
+                    return `${['A', 'B', 'C', 'D'][oIdx]}. ${getPlainTextForAI(opt)}`;
+                }).join('\n');
+
+                return `QUESTION_INDEX=${idx + 1}\nCâu ${q.id || idx + 1}: ${getPlainTextForAI(q.text || '')}\n${opts}`;
+            }).join('\n\n---\n\n');
+
+            return [
+                `PHẦN: ${parentLabels[sec.parentType] || sec.parentType || ''}`,
+                `MONDAI: ${getPlainTextForAI(sec.title || '')}`,
+                `ĐOẠN ĐỌC:\n${getPlainTextForAI(group.passageHTML || '')}`,
+                `DANH SÁCH CÂU HỎI:\n${questions}`
+            ].filter(Boolean).join('\n\n');
+        }
+
+        function buildStrictGeminiPrompt(mode, contextText, isBatch = false) {
+            const baseRule = `
+        Bạn là chuyên gia JLPT nhiều năm, nhiệm vụ là trích xuất TỪ VỰNG hoặc NGỮ PHÁP từ dữ liệu đã cho để đổ vào 2 ô riêng:
+        - mode="vocab"  → chỉ trả dữ liệu cho Ô TỪ VỰNG / cột Lời giải.
+        - mode="grammar" → chỉ trả dữ liệu cho Ô GHI CHÚ.
+
+        QUY TẮC TUYỆT ĐỐI:
+        1. Không bịa. Không chế từ, không chế cách đọc, không chế âm Hán, không chế ngữ pháp.
+        2. Chỉ lấy mục xuất hiện trực tiếp trong DỮ LIỆU đầu vào: đoạn đọc, câu hỏi, đáp án A/B/C/D.
+        3. Nếu không chắc 100%, bỏ qua.
+        4. Không giải thích lan man; viết ngắn, đúng trọng tâm, dễ đưa vào Excel.
+        5. Không thêm từ/cấu trúc ngoài đề.
+        6. Không lặp lại cùng một từ/cấu trúc trong cùng danh sách.
+        7. Trả về JSON hợp lệ, không markdown, không \`\`\`.
+        8. Tiếng Việt phải ngắn, chuẩn, phục vụ học sinh ôn JLPT.
+        9. Với bài có nhiều MONDAI/câu hỏi, phải phân tích đúng phạm vi từng QUESTION_INDEX.
+        `;
+
+            const vocabRule = `
+        QUY TẮC RIÊNG CHO TỪ VỰNG — KẾT QUẢ ĐƯA VÀO Ô TỪ VỰNG:
+        - KHÔNG chỉ lấy từ có Kanji. Bắt buộc xét toàn bộ từ vựng có trong:
+          + ĐOẠN ĐỌC nếu dữ liệu có đoạn đọc.
+          + CÂU HỎI.
+          + ĐÁP ÁN A/B/C/D.
+        - Phải xét đủ 4 nhóm:
+          1. Kanji: 学校, 勉強, 必要, 生活...
+          2. Kanji + Kana: 食べる, 読みます, 受け取る...
+          3. Hiragana có nghĩa từ vựng: たくさん, いつも, すぐ, とても, まだ, もう, ぜひ, はかる...
+          4. Katakana có nghĩa từ vựng: テスト, アルバイト, コンビニ, ルール, スポーツ...
+        - Với Hiragana/Katakana thuần:
+          + "surface" ghi nguyên dạng xuất hiện.
+          + "reading" để trống, trừ khi thật sự cần.
+          + "hanviet" để trống nếu không có âm Hán.
+        - Với Kanji/Kanji+Kana:
+          + "surface" ghi nguyên dạng xuất hiện.
+          + "reading" ghi hiragana nếu chắc.
+          + "hanviet" ghi ÂM HÁN nếu chắc.
+        - Bài MONDAI hỏi CÁCH SỬ DỤNG TỪ ĐÚNG:
+          + Phải lấy từ/cụm phổ biến, đáng học trong câu hỏi và A/B/C/D.
+          + Nếu từ mục tiêu là hiragana như はかる, vẫn phải phân tích nó nếu xuất hiện trực tiếp.
+          + "usage_note" ghi dấu hiệu dùng nhanh: đi với trợ từ nào, sắc thái, văn nói/văn viết, hay nhầm với từ nào.
+        - TỪ ĐỒNG NGHĨA / GẦN NGHĨA:
+          + Nếu có cặp đồng nghĩa/gần nghĩa trong đề, chỉ tạo 1 mục duy nhất cho cả cặp.
+          + Ví dụ có 単純 và わかりやすい thì chỉ trả 1 item: surface="単純", synonym_of="わかりやすい".
+          + Nếu Gemini thấy chiều ngược lại わかりやすい=単純 thì vẫn chỉ tính là 1 cặp, không tạo thêm item thứ hai.
+          + Khi một cặp đã được trả, TUYỆT ĐỐI không liệt kê riêng từng từ trong cặp nữa.
+          + Nếu một bên có Kanji và một bên là Hiragana/Katakana, ưu tiên bên có Kanji làm "surface", bên còn lại làm "synonym_of".
+          + Nếu cả hai đều Kanji hoặc đều Kana, giữ thứ tự xuất hiện tự nhiên trong đề.
+          + Chỉ ghi synonym_of khi chắc chắn trong ngữ cảnh JLPT; không đoán mò.
+        - Không lấy trợ từ đơn lẻ quá cơ bản như は, が, を, に, で, と, へ, も nếu không phải mục cần học.
+        - Không lấy đuôi chia động từ đơn lẻ như ます, ない, た, て nếu đứng riêng.
+        `;
+
+            const grammarRule = `
+        QUY TẮC RIÊNG CHO NGỮ PHÁP / CẤU TRÚC — KẾT QUẢ ĐƯA VÀO Ô GHI CHÚ:
+        - Liệt kê mẫu ngữ pháp/cấu trúc xuất hiện trong ĐOẠN ĐỌC, CÂU HỎI, đáp án A/B/C/D.
+        - Không lấy từ vựng đơn lẻ.
+        - Không lấy trợ từ quá cơ bản nếu không có giá trị ôn thi.
+        - "pattern" ghi mẫu/cụm cấu trúc đúng để học và nhận diện.
+        - "meaning_vi" ghi nghĩa/cách dùng chính bằng tiếng Việt ngắn.
+        - "note" ghi công thức, cách nối, bẫy, khác biệt cách dùng nếu có.
+        - "quick_sign" ghi dấu hiệu nhận dạng nhanh trong lúc thi, đặc biệt cho:
+          + MONDAI cách sử dụng từ đúng.
+          + Bài sắp xếp lại câu.
+          + Bài điền sao / vị trí sao / điền vào đoạn văn.
+          + Dấu hiệu vế trước/vế sau, cặp từ hay đi kèm, đuôi câu, sắc thái, vị trí trong câu.
+        - Nếu không có dấu hiệu thật sự rõ, để "quick_sign" là chuỗi rỗng.
+        `;
+
+            const vocabItemSchema = `{
+                "surface": "từ/cụm/cặp đồng nghĩa gốc đúng như xuất hiện trong đề",
+                "reading": "hiragana nếu có Kanji và chắc chắn, không chắc để trống",
+                "hanviet": "ÂM HÁN nếu chắc, không chắc để trống",
+                "meaning_vi": "nghĩa tiếng Việt ngắn",
+                "synonym_of": "từ đồng nghĩa/gần nghĩa xuất hiện trong dữ liệu; không có thì để trống",
+                "usage_note": "cách dùng/dấu hiệu nhận diện cực ngắn; không có thì để trống",
+                "source": "passage/question/A/B/C/D"
+            }`;
+
+            const grammarItemSchema = `{
+                "pattern": "mẫu ngữ pháp/cấu trúc",
+                "meaning_vi": "nghĩa/cách dùng tiếng Việt ngắn",
+                "note": "công thức/cách nối/lưu ý bẫy ngắn nếu cần",
+                "quick_sign": "dấu hiệu đặc trưng để nhìn nhanh đánh nhanh; không có thì để trống",
+                "source": "passage/question/A/B/C/D"
+            }`;
+
+            if (isBatch && mode === 'vocab') {
+                return `${baseRule}
+
+        ${vocabRule}
+
+        NHIỆM VỤ:
+        - common_items: lấy từ vựng xuất hiện trong ĐOẠN ĐỌC chung.
+        - questions[].items: lấy từ vựng xuất hiện trong CÂU HỎI và đáp án A/B/C/D của đúng QUESTION_INDEX.
+        - Nếu một từ chỉ nằm trong đoạn đọc, đưa vào common_items, không lặp lại ở questions[].items.
+        - Nếu một từ nằm trong câu hỏi hoặc A/B/C/D, đưa vào đúng QUESTION_INDEX.
+        - Bắt buộc xét Kanji, Hiragana, Katakana, từ hỗn hợp Kanji+Kana.
+        - Cặp đồng nghĩa A=B và B=A chỉ trả 1 item. Sau khi đã trả cặp, bỏ qua từng từ đơn lẻ của cặp đó.
+
+        Trả JSON đúng schema:
+        {
+        "common_items": [${vocabItemSchema}],
+        "questions": [
+            {
+            "qIndex": 1,
+            "items": [${vocabItemSchema}]
+            }
+        ]
+        }
+
+        Nếu không có mục chắc chắn:
+        - common_items để []
+        - items để []
+
+        DỮ LIỆU:
+        ${contextText}`;
+            }
+
+            if (isBatch && mode === 'grammar') {
+                return `${baseRule}
+
+        ${grammarRule}
+
+        NHIỆM VỤ:
+        - common_items: lấy mẫu ngữ pháp/cấu trúc xuất hiện trong ĐOẠN ĐỌC chung.
+        - questions[].items: lấy mẫu ngữ pháp/cấu trúc xuất hiện trong CÂU HỎI và đáp án A/B/C/D của đúng QUESTION_INDEX.
+        - Nếu cấu trúc chỉ nằm trong đoạn đọc, đưa vào common_items, không lặp lại ở questions[].items.
+        - Nếu cấu trúc nằm trong câu hỏi hoặc A/B/C/D, đưa vào đúng QUESTION_INDEX.
+        - Bắt buộc ghi quick_sign nếu có dấu hiệu nhận dạng nhanh cho cách dùng từ, sắp xếp câu, dấu sao.
+
+        Trả JSON đúng schema:
+        {
+        "common_items": [${grammarItemSchema}],
+        "questions": [
+            {
+            "qIndex": 1,
+            "items": [${grammarItemSchema}]
+            }
+        ]
+        }
+
+        Nếu không có mục chắc chắn:
+        - common_items để []
+        - items để []
+
+        DỮ LIỆU:
+        ${contextText}`;
+            }
+
+            if (mode === 'vocab') {
+                return `${baseRule}
+
+        ${vocabRule}
+
+        Hãy liệt kê từ vựng có trong ĐOẠN ĐỌC nếu có, CÂU HỎI và đáp án A/B/C/D.
+        Bắt buộc xét:
+        - Kanji
+        - Hiragana
+        - Katakana
+        - Kanji + Kana
+        - Từ/cụm phổ biến trong bài hỏi cách sử dụng đúng
+        - Cặp đồng nghĩa/gần nghĩa nếu xuất hiện trong dữ liệu
+
+        Luật chống trùng đặc biệt:
+        - Nếu có 単純=わかりやすい và cũng thấy わかりやすい=単純, chỉ trả 1 item.
+        - Khi đã trả cặp đồng nghĩa, không trả riêng 単純 hoặc わかりやすい nữa.
+
+        Trả JSON đúng schema:
+        {
+        "items": [${vocabItemSchema}]
+        }
+
+        Nếu không có mục chắc chắn, trả:
+        {"items":[]}
+
+        DỮ LIỆU:
+        ${contextText}`;
+            }
+
+            return `${baseRule}
+
+        ${grammarRule}
+
+        Hãy liệt kê ngữ pháp/cấu trúc có trong ĐOẠN ĐỌC nếu có, CÂU HỎI và đáp án A/B/C/D.
+        Kết quả này dùng cho Ô GHI CHÚ, nên ưu tiên:
+        - mẫu ngữ pháp
+        - công thức/cách nối
+        - dấu hiệu nhận dạng nhanh
+        - bẫy thường gặp khi làm bài cách dùng từ, sắp xếp câu, dấu sao
+
+        Trả JSON đúng schema:
+        {
+        "items": [${grammarItemSchema}]
+        }
+
+        Nếu không có mục chắc chắn, trả:
+        {"items":[]}
+
+        DỮ LIỆU:
+        ${contextText}`;
+        }
+
+        function hasKanjiForSynonymDisplay(value) {
+            return /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF々〆ヶ]/.test(String(value || ''));
+        }
+
+        function cleanSynonymDisplayPart(value) {
+            return String(value || '')
+                .replace(/[=＝]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+        }
+
+        function buildVocabSurfaceDisplay(surfaceRaw, synonymRaw) {
+            let surface = cleanSynonymDisplayPart(surfaceRaw);
+            let synonym = cleanSynonymDisplayPart(synonymRaw);
+
+            if (!surface) return '';
+            if (!synonym || normalizeAIDedupeText(surface) === normalizeAIDedupeText(synonym)) {
+                return surface;
+            }
+
+            // Nếu surface đã là một cặp A=B do AI trả về thì giữ nguyên, chỉ chuẩn hóa dấu bằng.
+            if (/[=＝]/.test(String(surfaceRaw || ''))) {
+                const parts = String(surfaceRaw || '').split(/[=＝]/).map(cleanSynonymDisplayPart).filter(Boolean);
+                if (parts.length >= 2) {
+                    if (!hasKanjiForSynonymDisplay(parts[0]) && hasKanjiForSynonymDisplay(parts[1])) {
+                        return `${parts[1]} ＝ ${parts[0]}`;
+                    }
+                    return `${parts[0]} ＝ ${parts[1]}`;
+                }
+            }
+
+            // Cặp đồng nghĩa có một bên Kanji, một bên Hiragana/Katakana:
+            // luôn đẩy bên Kanji lên trước để khi xuất Excel, cả cặp nằm ở cột Kanji.
+            if (!hasKanjiForSynonymDisplay(surface) && hasKanjiForSynonymDisplay(synonym)) {
+                const tmp = surface;
+                surface = synonym;
+                synonym = tmp;
+            }
+
+            return `${surface} ＝ ${synonym}`;
+        }
+
+        function renderVocabItemsToHtml(items) {
+            if (!Array.isArray(items) || items.length === 0) {
+                return 'Không phát hiện từ vựng chắc chắn trong dữ liệu đã cho.';
+            }
+
+            return items.map(item => {
+                const surfaceRaw = String(item.surface || '').trim();
+                const readingRaw = String(item.reading || '').trim();
+                const synonymRaw = String(item.synonym_of || item.synonym || item.equal_to || '').trim();
+                const usageRaw = String(item.usage_note || item.quick_sign || '').trim();
+
+                const displaySurfaceRaw = buildVocabSurfaceDisplay(surfaceRaw, synonymRaw);
+                const surface = answerTableEscapeHtml(displaySurfaceRaw);
+
+                // Tránh lặp: たくさん(たくさん), テスト(テスト), hoặc lặp phần đã có trong cặp đồng nghĩa.
+                const reading = readingRaw &&
+                    normalizeAIDedupeText(readingRaw) !== normalizeAIDedupeText(surfaceRaw) &&
+                    !normalizeAIDedupeText(displaySurfaceRaw).includes(normalizeAIDedupeText(readingRaw))
+                    ? `(${answerTableEscapeHtml(readingRaw)})`
+                    : '';
+
+                const hanviet = item.hanviet
+                    ? ` ${answerTableEscapeHtml(String(item.hanviet).toUpperCase())}`
+                    : '';
+
+                const meaning = item.meaning_vi
+                    ? ` - ${answerTableEscapeHtml(item.meaning_vi)}`
+                    : '';
+
+                const usage = usageRaw
+                    ? ` （${answerTableEscapeHtml(usageRaw)}）`
+                    : '';
+
+                return `${surface}${reading}${hanviet}${meaning}${usage}`;
+            }).filter(Boolean).join('<br>');
+        }
+
+        function renderGrammarItemsToHtml(items) {
+            if (!Array.isArray(items) || items.length === 0) {
+                return 'Không phát hiện mẫu ngữ pháp chắc chắn trong dữ liệu đã cho.';
+            }
+
+            return items.map(item => {
+                const pattern = answerTableEscapeHtml(item.pattern || '');
+                const meaning = item.meaning_vi ? `: ${answerTableEscapeHtml(item.meaning_vi)}` : '';
+                const note = item.note ? ` — ${answerTableEscapeHtml(item.note)}` : '';
+                const quickSign = item.quick_sign ? ` — Dấu hiệu: ${answerTableEscapeHtml(item.quick_sign)}` : '';
+                return `${pattern}${meaning}${note}${quickSign}`;
+            }).filter(Boolean).join('<br>');
+        }
+
+        function normalizeAIDedupeText(value) {
+            const holder = document.createElement('div');
+            holder.innerHTML = String(value || '');
+            return (holder.textContent || String(value || ''))
+                .normalize('NFKC')
+                .toLowerCase()
+                .replace(/[\s\u3000\(\)（）【】「」『』\[\]{}.,，、。:：;；\-–—_＿~〜・･\/\\|"'“”‘’!！?？]/g, '')
+                .trim();
+        }
+
+        function removeAIBlocksForCompare(html, ignoredBlockTypes = []) {
+            const holder = document.createElement('div');
+            holder.innerHTML = html || '';
+
+            holder.querySelectorAll('[data-ai-block]').forEach(el => {
+                const type = el.getAttribute('data-ai-block');
+                if (ignoredBlockTypes.includes(type)) el.remove();
+            });
+
+            return holder.innerHTML;
+        }
+
+        function getAIItemMainValue(item, mode) {
+            if (!item) return '';
+            if (mode === 'vocab') return item.surface || '';
+            return item.pattern || '';
+        }
+
+        function splitAISynonymTokens(value) {
+            return String(value || '')
+                .split(/[=＝]/)
+                .map(v => v.trim())
+                .filter(Boolean);
+        }
+
+        function getAISynonymValues(item) {
+            if (!item) return [];
+            const surfaceParts = splitAISynonymTokens(item.surface || '');
+            const synonymParts = splitAISynonymTokens(item.synonym_of || item.synonym || item.equal_to || '');
+            const values = surfaceParts.concat(synonymParts)
+                .map(v => String(v || '').trim())
+                .filter(Boolean);
+
+            const unique = [];
+            const seen = new Set();
+            values.forEach(v => {
+                const key = normalizeAIDedupeText(v);
+                if (!key || seen.has(key)) return;
+                seen.add(key);
+                unique.push(v);
+            });
+            return unique;
+        }
+
+        function getAISynonymPairKey(item) {
+            const values = getAISynonymValues(item);
+            if (values.length < 2) return '';
+
+            const normalized = values
+                .map(v => normalizeAIDedupeText(v))
+                .filter(Boolean)
+                .sort();
+
+            if (normalized.length < 2) return '';
+            return 'synpair:' + normalized.join('=');
+        }
+
+        function getAIItemKey(item, mode) {
+            if (!item) return '';
+
+            if (mode === 'vocab') {
+                const synonymPairKey = getAISynonymPairKey(item);
+                if (synonymPairKey) return synonymPairKey;
+
+                return normalizeAIDedupeText([
+                    item.surface || '',
+                    item.reading || '',
+                    item.hanviet || '',
+                    item.meaning_vi || ''
+                ].join('|'));
+            }
+
+            return normalizeAIDedupeText([
+                item.pattern || '',
+                item.meaning_vi || '',
+                item.note || ''
+            ].join('|'));
+        }
+
+        function isAIItemAlreadyInHtml(existingHtml, item, mode, ignoredBlockTypes = []) {
+            const compareHtml = removeAIBlocksForCompare(existingHtml || '', ignoredBlockTypes);
+            const existingText = normalizeAIDedupeText(getPlainTextForAI(compareHtml));
+            const main = normalizeAIDedupeText(getAIItemMainValue(item, mode));
+
+            if (!main) return true;
+
+            // Với cặp đồng nghĩa, nếu existing đã có 1 trong 2 vế hoặc cả cặp thì coi như đã tồn tại.
+            if (mode === 'vocab') {
+                const synonymValues = getAISynonymValues(item);
+                if (synonymValues.length >= 2) {
+                    return synonymValues.some(v => {
+                        const key = normalizeAIDedupeText(v);
+                        return key && existingText.includes(key);
+                    });
+                }
+            }
+
+            return existingText.includes(main);
+        }
+
+        function dedupeAIItemsForField(items, existingHtml, mode, ignoredBlockTypes = []) {
+            const seen = new Set();
+            const seenSynonymParts = new Set();
+
+            return (items || []).filter(item => {
+                const main = normalizeAIDedupeText(getAIItemMainValue(item, mode));
+                if (!main) return false;
+
+                const key = getAIItemKey(item, mode);
+                if (!key || seen.has(key)) return false;
+
+                // Nếu đã nhận cặp A=B thì bỏ qua A hoặc B đơn lẻ xuất hiện sau đó.
+                if (mode === 'vocab') {
+                    const synonymValues = getAISynonymValues(item);
+                    const synonymKeys = synonymValues.map(v => normalizeAIDedupeText(v)).filter(Boolean);
+
+                    if (synonymKeys.length < 2 && seenSynonymParts.has(main)) {
+                        return false;
+                    }
+
+                    if (synonymKeys.length >= 2) {
+                        if (synonymKeys.some(v => seenSynonymParts.has(v))) {
+                            return false;
+                        }
+                        synonymKeys.forEach(v => seenSynonymParts.add(v));
+                    }
+                }
+
+                seen.add(key);
+
+                if (isAIItemAlreadyInHtml(existingHtml, item, mode, ignoredBlockTypes)) {
+                    return false;
+                }
+
+                return true;
+            });
+        }
+
+        function upsertAIBlock(existingHtml, blockType, title, bodyHtml) {
+            const holder = document.createElement('div');
+            holder.innerHTML = existingHtml || '';
+
+            holder.querySelectorAll(`[data-ai-block="${blockType}"]`).forEach(el => el.remove());
+
+            const block = document.createElement('div');
+            block.className = 'ai-generated-block';
+            block.setAttribute('data-ai-block', blockType);
+            block.innerHTML = `<b>${title}</b><br>${bodyHtml || ''}`;
+
+            holder.appendChild(block);
+            return holder.innerHTML.trim();
+        }
+
+        async function runQuestionAI(sIdx, gIdx, qIdx, mode, includePassage = false) {
+            const sec = examSections[sIdx];
+            const q = sec?.groups?.[gIdx]?.questions?.[qIdx];
+
+            if (!q) return;
+
+            const label = mode === 'vocab' ? 'AI từ vựng' : 'AI ngữ pháp';
+
+            showLoadingScreen(`✨ ${label} đang phân tích...`, 250, async () => {
+                try {
+                    const contextText = buildQuestionAIContext(sIdx, gIdx, qIdx, includePassage);
+                    const prompt = buildStrictGeminiPrompt(mode, contextText, false);
+                    const json = await callGeminiStrictJSON(prompt, 'normal');
+
+                    ensureQuestionExplanationFields(q);
+
+                    if (mode === 'vocab') {
+                        const filteredItems = dedupeAIItemsForField(
+                            json.items || [],
+                            q.explanation || '',
+                            'vocab',
+                            ['ai-vocab']
+                        );
+
+                        const html = renderVocabItemsToHtml(filteredItems);
+
+                        q.explanation = upsertAIBlock(
+                            q.explanation || '',
+                            'ai-vocab',
+                            'AI từ vựng câu hỏi + A/B/C/D',
+                            html
+                        );
+                    } else {
+                        const filteredItems = dedupeAIItemsForField(
+                            json.items || [],
+                            q.note || '',
+                            'grammar',
+                            ['ai-grammar']
+                        );
+
+                        const html = renderGrammarItemsToHtml(filteredItems);
+
+                        q.note = upsertAIBlock(
+                            q.note || '',
+                            'ai-grammar',
+                            'AI ngữ pháp câu hỏi + A/B/C/D',
+                            html
+                        );
+                    }
+
+                    if (sIdx !== activeSectionIndex) activeSectionIndex = sIdx;
+
+                    initApp();
+                    forceAutoSave();
+                    showRTEToast(`${label} đã cập nhật vào câu ${q.id}.`);
+                } catch (err) {
+                    console.error(err);
+                    alert('Gemini AI lỗi: ' + (err.message || err));
+                }
+            });
+        }
+
+        async function runGroupAI(sIdx, gIdx, mode) {
+            const sec = examSections[sIdx];
+            const group = sec?.groups?.[gIdx];
+
+            if (!sec || !group) return;
+
+            const label = mode === 'vocab' ? 'AI từ vựng bài đọc' : 'AI ngữ pháp bài đọc';
+
+            showLoadingScreen(`✨ ${label} đang phân tích toàn bài...`, 250, async () => {
+                try {
+                    const contextText = buildGroupAIContext(sIdx, gIdx);
+                    const prompt = buildStrictGeminiPrompt(mode, contextText, true);
+                    const json = await callGeminiStrictJSON(prompt, 'long');
+
+                    const firstQ = group.questions?.[0];
+
+                    if (firstQ) {
+                        ensureQuestionExplanationFields(firstQ);
+
+                        if (mode === 'vocab') {
+                            const commonItems = dedupeAIItemsForField(
+                                json.common_items || [],
+                                firstQ.explanation || '',
+                                'vocab',
+                                ['ai-vocab-common']
+                            );
+
+                            const commonHtml = renderVocabItemsToHtml(commonItems);
+
+                            firstQ.explanation = upsertAIBlock(
+                                firstQ.explanation || '',
+                                'ai-vocab-common',
+                                'AI từ vựng chung đoạn văn',
+                                commonHtml
+                            );
+                        } else {
+                            const commonItems = dedupeAIItemsForField(
+                                json.common_items || [],
+                                firstQ.note || '',
+                                'grammar',
+                                ['ai-grammar-common']
+                            );
+
+                            const commonHtml = renderGrammarItemsToHtml(commonItems);
+
+                            firstQ.note = upsertAIBlock(
+                                firstQ.note || '',
+                                'ai-grammar-common',
+                                'AI ngữ pháp chung đoạn văn',
+                                commonHtml
+                            );
+                        }
+                    }
+
+                    const resultList = Array.isArray(json.questions) ? json.questions : [];
+
+                    resultList.forEach(item => {
+                        const qIndex = parseInt(item.qIndex, 10) - 1;
+                        const q = group.questions?.[qIndex];
+
+                        if (!q) return;
+
+                        ensureQuestionExplanationFields(q);
+
+                        if (mode === 'vocab') {
+                            const filteredItems = dedupeAIItemsForField(
+                                item.items || [],
+                                q.explanation || '',
+                                'vocab',
+                                ['ai-vocab']
+                            );
+
+                            const html = renderVocabItemsToHtml(filteredItems);
+
+                            q.explanation = upsertAIBlock(
+                                q.explanation || '',
+                                'ai-vocab',
+                                'AI từ vựng câu hỏi + A/B/C/D',
+                                html
+                            );
+                        } else {
+                            const filteredItems = dedupeAIItemsForField(
+                                item.items || [],
+                                q.note || '',
+                                'grammar',
+                                ['ai-grammar']
+                            );
+
+                            const html = renderGrammarItemsToHtml(filteredItems);
+
+                            q.note = upsertAIBlock(
+                                q.note || '',
+                                'ai-grammar',
+                                'AI ngữ pháp câu hỏi + A/B/C/D',
+                                html
+                            );
+                        }
+                    });
+
+                    if (sIdx !== activeSectionIndex) activeSectionIndex = sIdx;
+
+                    initApp();
+                    forceAutoSave();
+                    showRTEToast(`${label} đã cập nhật cho bài đọc.`);
+                } catch (err) {
+                    console.error(err);
+                    alert('Gemini AI lỗi: ' + (err.message || err));
+                }
+            });
+        }
+
+
+
+        function refreshBulkAIFieldsForQuestion(sIdx, gIdx, qIdx) {
+            const q = examSections?.[sIdx]?.groups?.[gIdx]?.questions?.[qIdx];
+            if (!q) return;
+            ensureQuestionExplanationFields(q);
+
+            const vocabEl = document.querySelector(`.bulk-exp-input[data-s="${sIdx}"][data-g="${gIdx}"][data-q="${qIdx}"]`);
+            if (vocabEl) vocabEl.innerHTML = getExplanationDisplayHtml(q.explanation || '');
+
+            const noteEl = document.querySelector(`.bulk-note-input[data-s="${sIdx}"][data-g="${gIdx}"][data-q="${qIdx}"]`);
+            if (noteEl) noteEl.innerHTML = q.note || '';
+        }
+
+        async function runBulkQuestionAI(sIdx, gIdx, qIdx, mode, includePassage = false) {
+            const sec = examSections[sIdx];
+            const q = sec?.groups?.[gIdx]?.questions?.[qIdx];
+            if (!q) return;
+
+            const label = mode === 'vocab' ? 'AI từ vựng' : 'AI ngữ pháp';
+
+            showLoadingScreen(`✨ ${label} đang phân tích cho ô lời giải hàng loạt...`, 250, async () => {
+                try {
+                    const contextText = buildQuestionAIContext(sIdx, gIdx, qIdx, includePassage);
+                    const prompt = buildStrictGeminiPrompt(mode, contextText, false);
+                    const json = await callGeminiStrictJSON(prompt, 'normal');
+
+                    ensureQuestionExplanationFields(q);
+
+                    if (mode === 'vocab') {
+                        const filteredItems = dedupeAIItemsForField(
+                            json.items || [],
+                            q.explanation || '',
+                            'vocab',
+                            ['ai-vocab']
+                        );
+                        const html = renderVocabItemsToHtml(filteredItems);
+                        q.explanation = upsertAIBlock(
+                            q.explanation || '',
+                            'ai-vocab',
+                            'AI từ vựng câu hỏi + A/B/C/D',
+                            html
+                        );
+                    } else {
+                        const filteredItems = dedupeAIItemsForField(
+                            json.items || [],
+                            q.note || '',
+                            'grammar',
+                            ['ai-grammar']
+                        );
+                        const html = renderGrammarItemsToHtml(filteredItems);
+                        q.note = upsertAIBlock(
+                            q.note || '',
+                            'ai-grammar',
+                            'AI ngữ pháp câu hỏi + A/B/C/D',
+                            html
+                        );
+                    }
+
+                    refreshBulkAIFieldsForQuestion(sIdx, gIdx, qIdx);
+                    forceAutoSave();
+                    showRTEToast(`${label} đã điền vào modal lời giải hàng loạt.`);
+                } catch (err) {
+                    console.error(err);
+                    alert('Gemini AI lỗi: ' + (err.message || err));
+                }
+            });
+        }
+
+        async function runBulkGroupAI(sIdx, gIdx, mode) {
+            const sec = examSections[sIdx];
+            const group = sec?.groups?.[gIdx];
+            if (!sec || !group) return;
+
+            const label = mode === 'vocab' ? 'AI từ vựng bài đọc' : 'AI ngữ pháp bài đọc';
+
+            showLoadingScreen(`✨ ${label} đang phân tích trong modal hàng loạt...`, 250, async () => {
+                try {
+                    const contextText = buildGroupAIContext(sIdx, gIdx);
+                    const prompt = buildStrictGeminiPrompt(mode, contextText, true);
+                    const json = await callGeminiStrictJSON(prompt, 'long');
+
+                    const firstQ = group.questions?.[0];
+                    if (firstQ) {
+                        ensureQuestionExplanationFields(firstQ);
+                        if (mode === 'vocab') {
+                            const commonItems = dedupeAIItemsForField(
+                                json.common_items || [],
+                                firstQ.explanation || '',
+                                'vocab',
+                                ['ai-vocab-common']
+                            );
+                            const commonHtml = renderVocabItemsToHtml(commonItems);
+                            firstQ.explanation = upsertAIBlock(
+                                firstQ.explanation || '',
+                                'ai-vocab-common',
+                                'AI từ vựng chung đoạn văn',
+                                commonHtml
+                            );
+                        } else {
+                            const commonItems = dedupeAIItemsForField(
+                                json.common_items || [],
+                                firstQ.note || '',
+                                'grammar',
+                                ['ai-grammar-common']
+                            );
+                            const commonHtml = renderGrammarItemsToHtml(commonItems);
+                            firstQ.note = upsertAIBlock(
+                                firstQ.note || '',
+                                'ai-grammar-common',
+                                'AI ngữ pháp chung đoạn văn',
+                                commonHtml
+                            );
+                        }
+                    }
+
+                    const resultList = Array.isArray(json.questions) ? json.questions : [];
+                    resultList.forEach(item => {
+                        const qIndex = parseInt(item.qIndex, 10) - 1;
+                        const q = group.questions?.[qIndex];
+                        if (!q) return;
+
+                        ensureQuestionExplanationFields(q);
+
+                        if (mode === 'vocab') {
+                            const filteredItems = dedupeAIItemsForField(
+                                item.items || [],
+                                q.explanation || '',
+                                'vocab',
+                                ['ai-vocab']
+                            );
+                            const html = renderVocabItemsToHtml(filteredItems);
+                            q.explanation = upsertAIBlock(
+                                q.explanation || '',
+                                'ai-vocab',
+                                'AI từ vựng câu hỏi + A/B/C/D',
+                                html
+                            );
+                        } else {
+                            const filteredItems = dedupeAIItemsForField(
+                                item.items || [],
+                                q.note || '',
+                                'grammar',
+                                ['ai-grammar']
+                            );
+                            const html = renderGrammarItemsToHtml(filteredItems);
+                            q.note = upsertAIBlock(
+                                q.note || '',
+                                'ai-grammar',
+                                'AI ngữ pháp câu hỏi + A/B/C/D',
+                                html
+                            );
+                        }
+                    });
+
+                    (group.questions || []).forEach((_, qIndex) => refreshBulkAIFieldsForQuestion(sIdx, gIdx, qIndex));
+                    forceAutoSave();
+                    showRTEToast(`${label} đã cập nhật trong modal lời giải hàng loạt.`);
+                } catch (err) {
+                    console.error(err);
+                    alert('Gemini AI lỗi: ' + (err.message || err));
+                }
+            });
+        }
+
         function clearFocusIfActive(sIdx, gIdx, qIdx, blockEl) {
             if (globalActiveFocus && globalActiveFocus.sIdx === sIdx && globalActiveFocus.gIdx === gIdx && globalActiveFocus.qIdx === qIdx) {
                 globalActiveFocus = null;
@@ -2232,6 +3645,15 @@
             document.querySelectorAll('.question-explanation-grid').forEach(exp => {
                 exp.classList.remove('manual-toggle-show', 'manual-toggle-hide');
             });
+            examSections.forEach(sec => {
+                (sec.groups || []).forEach(group => {
+                    (group.questions || []).forEach(q => {
+                        delete q.explainState;
+                    });
+                });
+            });
+
+            autoSave();
         }
 
         function toggleTitles() {
@@ -2250,18 +3672,35 @@
             const block = btn.closest('.question-block');
             const exp = block.querySelector('.question-explanation-grid');
             if (!exp) return;
-            
+
+            const sIdx = parseInt(block.getAttribute('data-s-idx'));
+            const gIdx = parseInt(block.getAttribute('data-g-idx'));
+            const qIdx = parseInt(block.getAttribute('data-q-idx'));
+            const q = examSections[sIdx]?.groups?.[gIdx]?.questions?.[qIdx];
+
             const isGlobalHidden = document.body.classList.contains('hide-explanations-mode');
+
             if (isGlobalHidden) {
                 exp.classList.toggle('manual-toggle-show');
                 exp.classList.remove('manual-toggle-hide');
+
+                if (q) {
+                    q.explainState = exp.classList.contains('manual-toggle-show') ? 'visible' : '';
+                }
             } else {
                 exp.classList.toggle('manual-toggle-hide');
                 exp.classList.remove('manual-toggle-show');
+
+                if (q) {
+                    q.explainState = exp.classList.contains('manual-toggle-hide') ? 'hidden' : '';
+                }
             }
+
             if (window.getComputedStyle(exp).display !== 'none') {
                 exp.querySelectorAll('.question-explain, .question-note').forEach(autoResize);
             }
+
+            autoSave();
         }
 
         function reindexAllMondai() {
@@ -2719,6 +4158,8 @@
                                     <button type="button" title="Redo (Alt+Y)" onclick="execRTE('redo', ${gIdx})">↷</button>
                                     <button type="button" title="Chèn bảng trong hộp đoạn văn (Alt+T)" onclick="insertTableRTE(${gIdx})">▦ Bảng</button>
                                     <button type="button" title="Chèn ảnh trong hộp đoạn văn (Alt+G)" onclick="insertImageRTE(${gIdx})">🖼️ Ảnh</button>
+                                    <button type="button" class="ai-group-btn" title="AI phân tích từ vựng cho toàn bài đọc và từng câu hỏi" onclick="runGroupAI(${actualSectionIndex}, ${gIdx}, 'vocab')">✨ AI từ vựng bài đọc</button>
+                                    <button type="button" class="ai-group-btn grammar" title="AI phân tích ngữ pháp cho toàn bài đọc và từng câu hỏi" onclick="runGroupAI(${actualSectionIndex}, ${gIdx}, 'grammar')">✨ AI ngữ pháp bài đọc</button>
                                 </div>
                                 <div class="rte-object-tools table-tools" title="Bôi đen nhiều ô bằng cách kéo chuột qua các ô, rồi chọn thao tác.">
                                     <span class="tool-group-title">Bảng:</span>
@@ -2765,6 +4206,9 @@
                         block.className = `question-block ${isFocus ? 'active-focus' : ''}`;
                         block.id = `question-block-g${gIdx}-q${qIdx}`;
                         block.setAttribute('onmousedown', `clearFocusIfActive(${actualSectionIndex}, ${gIdx}, ${qIdx}, this)`);
+                        block.setAttribute('data-s-idx', actualSectionIndex);
+                        block.setAttribute('data-g-idx', gIdx);
+                        block.setAttribute('data-q-idx', qIdx);
 
                         let optsHTML = '';
                         const labels = ['A', 'B', 'C', 'D'];
@@ -2798,13 +4242,23 @@
                                 ${starInputHtml}
                                 ${underlineInputHtml}
                             </div>
-                            <div class="question-explanation-grid">
+                            <div class="question-explanation-grid ${q.explainState === 'visible' ? 'manual-toggle-show' : q.explainState === 'hidden' ? 'manual-toggle-hide' : ''}">
                                 <div class="explain-field-wrap vocab-wrap">
-                                    <div class="explain-field-label">📘 Từ vựng / lời giải</div>
+                                    <div class="explain-field-label">
+                                        📘 Từ vựng / lời giải
+                                        <span class="ai-mini-actions">
+                                            <button type="button" class="ai-mini-btn" onclick="runQuestionAI(${actualSectionIndex}, ${gIdx}, ${qIdx}, 'vocab')">AI từ vựng</button>
+                                        </span>
+                                    </div>
                                     <div contenteditable="true" class="question-explain editor-input" tabindex="-1" data-g-idx="${gIdx}" data-q-idx="${qIdx}" placeholder="VD: 海岸(かいがん) HẢI NGẠN - bờ biển" oninput="handleExplanationInput(this)" onkeydown="handleExplainKeydown(event, this)">${getExplanationDisplayHtml(explainFields.explanation || '')}</div>
                                 </div>
                                 <div class="explain-field-wrap note-wrap">
-                                    <div class="explain-field-label">📝 Ghi chú</div>
+                                    <div class="explain-field-label">
+                                        📝 Ghi chú
+                                        <span class="ai-mini-actions">
+                                            <button type="button" class="ai-mini-btn grammar" onclick="runQuestionAI(${actualSectionIndex}, ${gIdx}, ${qIdx}, 'grammar')">AI ngữ pháp</button>
+                                        </span>
+                                    </div>
                                     <div contenteditable="true" class="question-note editor-input" tabindex="-1" data-g-idx="${gIdx}" data-q-idx="${qIdx}" placeholder="Ghi chú riêng cho câu này..." oninput="handleNoteInput(this)" onkeydown="handleExplainKeydown(event, this)">${explainFields.note || ''}</div>
                                 </div>
                             </div>
@@ -3779,7 +5233,8 @@
             const obj = currentRTEObject.element;
             if (!document.getElementById(`dokkai-passage-${gIdx}`)?.contains(obj)) return false;
 
-            obj.style.maxWidth = obj.classList.contains('rte-table-frame') ? 'none' : '100%';
+            obj.style.maxWidth = obj.cla
+ssList.contains('rte-table-frame') ? 'none' : '100%';
             const tag = obj.tagName.toLowerCase();
             const isImageFrame = obj.classList.contains('rte-image-frame');
             const isTableFrame = obj.classList.contains('rte-table-frame');
@@ -5231,20 +6686,26 @@
             `;
         }
 
-        function getBulkGroupHeadline(group, gIdx, totalGroups = 1) {
+        function getBulkGroupHeadline(group, gIdx, totalGroups = 1, sIdx = null) {
             const questions = group?.questions || [];
             const rangeText = getQuestionRangeText(questions);
             const passageText = stripHtmlForLabel(group?.passageHTML || '');
             const shortPassage = passageText ? escapeHtmlAttr(passageText.slice(0, 70)) + (passageText.length > 70 ? '…' : '') : '';
             const groupLabel = totalGroups > 1 ? `Nhóm/Bài đọc ${gIdx + 1}` : 'Nhóm câu hỏi';
             const desc = shortPassage || 'Không có đoạn đọc riêng';
+            const bulkAiButtons = Number.isInteger(sIdx) ? `
+                <span class="bulk-group-ai-actions">
+                    <button type="button" class="ai-mini-btn" title="AI phân tích từ vựng toàn nhóm/bài đọc" onclick="runBulkGroupAI(${sIdx}, ${gIdx}, 'vocab')">AI từ vựng nhóm</button>
+                    <button type="button" class="ai-mini-btn grammar" title="AI phân tích ngữ pháp toàn nhóm/bài đọc" onclick="runBulkGroupAI(${sIdx}, ${gIdx}, 'grammar')">AI ngữ pháp nhóm</button>
+                </span>
+            ` : '';
             return `
                 <div class="bulk-group-headline">
                     <div>
                         <b>${groupLabel}</b>
                         <span>${desc}</span>
                     </div>
-                    <small>${rangeText}</small>
+                    <small>${rangeText}${bulkAiButtons}</small>
                 </div>
             `;
         }
@@ -5267,7 +6728,7 @@
                     (sec.groups || []).forEach((g, gIdx) => { 
                         const questions = g?.questions || [];
                         if (!questions.length) return;
-                        topicHtml += `<div class="bulk-group-card">${getBulkGroupHeadline(g, gIdx, (sec.groups || []).length)}<div class="bulk-exp-list">`;
+                        topicHtml += `<div class="bulk-group-card">${getBulkGroupHeadline(g, gIdx, (sec.groups || []).length, sIdx)}<div class="bulk-exp-list">`;
                         questions.forEach((q, qIdx) => { 
                             const explainFields = getQuestionExplanationFields(q);
                             topicHtml += `
@@ -5275,11 +6736,11 @@
                                     <span class="bulk-exp-label">Câu ${q.id}</span>
                                     <div class="bulk-exp-two-cols">
                                         <div class="bulk-exp-pane vocab-pane">
-                                            <div class="bulk-exp-sub-label">📘 Từ vựng / lời giải</div>
+                                            <div class="bulk-exp-sub-label">📘 Từ vựng / lời giải <span class="ai-mini-actions"><button type="button" class="ai-mini-btn" onclick="runBulkQuestionAI(${sIdx}, ${gIdx}, ${qIdx}, 'vocab')">AI từ vựng</button></span></div>
                                             <div contenteditable="true" class="bulk-exp-input bulk-exp-vocab" data-s="${sIdx}" data-g="${gIdx}" data-q="${qIdx}" placeholder="VD: 海岸(かいがん) HẢI NGẠN - bờ biển" oninput="handleBulkExplanationInput(this)" onkeydown="handleBulkExpKeydown(event, this)">${getExplanationDisplayHtml(explainFields.explanation || '')}</div>
                                         </div>
                                         <div class="bulk-exp-pane note-pane">
-                                            <div class="bulk-exp-sub-label">📝 Ghi chú</div>
+                                            <div class="bulk-exp-sub-label">📝 Ghi chú <span class="ai-mini-actions"><button type="button" class="ai-mini-btn grammar" onclick="runBulkQuestionAI(${sIdx}, ${gIdx}, ${qIdx}, 'grammar')">AI ngữ pháp</button></span></div>
                                             <div contenteditable="true" class="bulk-note-input" data-s="${sIdx}" data-g="${gIdx}" data-q="${qIdx}" placeholder="Ghi chú riêng..." oninput="handleBulkNoteInput(this)" onkeydown="handleBulkExpKeydown(event, this)">${explainFields.note || ''}</div>
                                         </div>
                                     </div>
@@ -5325,7 +6786,7 @@
                     (sec.groups || []).forEach((g, gIdx) => { 
                         const questions = g?.questions || [];
                         if (!questions.length) return;
-                        topicHtml += `<div class="bulk-group-card">${getBulkGroupHeadline(g, gIdx, (sec.groups || []).length)}<div class="bulk-group-body">`;
+                        topicHtml += `<div class="bulk-group-card">${getBulkGroupHeadline(g, gIdx, (sec.groups || []).length, sIdx)}<div class="bulk-group-body">`;
                         questions.forEach((q, qIdx) => { 
                             topicHtml += `
                                 <div class="bulk-ans-box">
@@ -5880,7 +7341,7 @@
 
         // ==========================================
         // BẢNG ĐÁP ÁN + LỜI GIẢI: xuất riêng thành file Excel khi xuất bản học sinh
-        // Dạng nhập hỗ trợ: Kanji(hiragana) ÂM HÁN - nghĩa; ghi chú nằm trong ô riêng
+        // Dạng nhập hỗ trợ: Kanji(hiragana/katakana) ÂM HÁN - nghĩa; ghi chú nằm trong ô riêng
         // ==========================================
         function answerTableEscapeHtml(value) {
             return String(value || '')
@@ -5916,35 +7377,39 @@
             const text = getPlainTextFromHtmlForAnswerTable(explanationHtml || '');
             if (!text) return { lines: [], note: '' };
 
+            const normalizedText = text
+                .replace(/AI\s*từ\s*vựng\s*/gi, '')
+                .replace(/AI\s*ngữ\s*pháp\s*/gi, '')
+                .trim();
+
             let noteParts = [];
-            const rawLines = text.split(/\n+/).map(line => line.trim()).filter(Boolean);
+            const rawLines = normalizedText.split(/[\n;；|]/).map(line => line.trim()).filter(Boolean);
             const lines = [];
 
             rawLines.forEach(raw => {
+                // Xóa các ký tự đầu dòng vô nghĩa (dấu chấm, gạch ngang...)
                 let line = raw.replace(/^[・･\-–—*●○◆◇\d]+[.)、．]?\s*/, '').trim();
                 if (!line) return;
 
-                const noteLabelMatch = line.match(/(?:ghi\s*chú|note|mẹo|nhớ)\s*[:：]\s*(.+)$/i);
+                // Nếu lỡ có cụm từ Ghi chú/Mẹo trong ô từ vựng, bóc nó ra ném sang cột Note
+                const noteLabelMatch = line.match(/(?:ghi\s*chú|note|mẹo|nhớ|giải\s*thích)\s*[:：]\s*(.+)$/i);
                 if (noteLabelMatch) {
                     noteParts.push(noteLabelMatch[1].trim());
                     line = line.slice(0, noteLabelMatch.index).trim();
                 }
 
-                const pipeParts = line.split(/\s*(?:\|\||\/\/|\|)\s*/);
-                if (pipeParts.length > 1) {
-                    line = pipeParts.shift().trim();
-                    noteParts.push(pipeParts.join(' | ').trim());
-                }
-
                 if (line) {
-                    // Nếu một dòng có nhiều mục cách nhau bằng ; hoặc dấu xuống ý, tách ra để mỗi từ vựng nằm một dòng.
-                    const pieces = line.split(/\s*[;；]\s*/).map(p => p.trim()).filter(Boolean);
-                    pieces.forEach(piece => {
-                        const hasLexicalSignal = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF々〆ヶぁ-んァ-ン]/.test(piece);
-                        const hasUpper = /[A-ZÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬĐÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴ]/.test(piece);
-                        if (hasLexicalSignal || hasUpper || pieces.length === 1) lines.push(piece);
-                        else noteParts.push(piece);
-                    });
+                    // ĐIỀU KIỆN 1 DÒNG EXCEL: Có tiếng Nhật hoặc chữ IN HOA (Âm Hán) từ 2 ký tự trở lên
+                    const hasLexicalSignal = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF々〆ヶぁ-んァ-ン]/.test(line);
+                    const hasUpper = /[A-ZÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬĐÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴ]{2,}/.test(line);
+                    
+                    // Nếu là từ vựng -> Đẩy vào mảng lines để tạo DÒNG MỚI TRONG EXCEL
+                    if (hasLexicalSignal || hasUpper) {
+                        lines.push(line);
+                    } else {
+                        // Nếu rác/text thường -> Ném vào cột Ghi chú
+                        noteParts.push(line);
+                    }
                 }
             });
 
@@ -5954,40 +7419,146 @@
             };
         }
 
+        function answerTableHasKanji(value) {
+            return /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF々〆ヶ]/.test(String(value || ''));
+        }
+
+        function answerTableExtractJapaneseTerm(value, preferLast = false) {
+            const cleaned = String(value || '')
+                .replace(/[（(][^）)]*[）)]/g, ' ')
+                .replace(/[A-ZÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬĐÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴ]+(?:[\s·・]+[A-ZÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬĐÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴ]+)*/g, ' ')
+                .trim();
+
+            const matches = cleaned.match(/[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF々〆ヶぁ-んァ-ンー]+/g) || [];
+            if (!matches.length) return '';
+            return preferLast ? matches[matches.length - 1] : matches[0];
+        }
+
+        function answerTableExtractSynonymPair(source) {
+            const raw = String(source || '');
+            if (!/[=＝]/.test(raw)) return null;
+
+            const parts = raw.split(/[=＝]/);
+            if (parts.length < 2) return null;
+
+            const leftTerm = answerTableExtractJapaneseTerm(parts[0], true);
+            const rightTerm = answerTableExtractJapaneseTerm(parts.slice(1).join('＝').split(/\s*(?:-|–|—|:|：)\s*/)[0], false);
+
+            if (!leftTerm || !rightTerm) return null;
+
+            let a = leftTerm;
+            let b = rightTerm;
+
+            // Nếu một bên có Kanji, ưu tiên bên đó đứng trước để Excel đưa cả cặp vào cột Kanji.
+            if (!answerTableHasKanji(a) && answerTableHasKanji(b)) {
+                const tmp = a;
+                a = b;
+                b = tmp;
+            }
+
+            return {
+                terms: [a, b],
+                display: `${a}=${b}`
+            };
+        }
+
+        function answerTableSplitMainMeaning(source) {
+            const text = String(source || '');
+            let depth = 0;
+            const openers = '([{（【「『';
+            const closers = ')]}）】」』';
+            for (let i = 0; i < text.length; i++) {
+                const ch = text[i];
+                if (openers.includes(ch)) {
+                    depth++;
+                    continue;
+                }
+                if (closers.includes(ch)) {
+                    depth = Math.max(0, depth - 1);
+                    continue;
+                }
+                if (depth === 0 && /[-–—:：]/.test(ch)) {
+                    return {
+                        head: text.slice(0, i).trim(),
+                        meaning: text.slice(i + 1).trim(),
+                        hasMeaning: true
+                    };
+                }
+            }
+            return { head: text.trim(), meaning: '', hasMeaning: false };
+        }
+
+        function answerTableNormalizeEntryTerm(term) {
+            return String(term || '')
+                .replace(/\s*[=＝]\s*/g, '=')
+                .replace(/\s*≠\s*/g, '≠')
+                .replace(/\s+/g, ' ')
+                .trim();
+        }
+
+        function answerTableExtractTrailingHanviet(head) {
+            const hanVietChars = 'A-ZÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬĐÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴ';
+            const upperRe = new RegExp('(?:^|\\s)([' + hanVietChars + ']+(?:[\\s·・]+[' + hanVietChars + ']+)*)$');
+            const m = String(head || '').trim().match(upperRe);
+            if (!m) return { term: String(head || '').trim(), hanviet: '' };
+            const hanviet = (m[1] || '').trim();
+            const term = String(head || '').slice(0, m.index).trim();
+            return { term: term || String(head || '').trim(), hanviet };
+        }
+
         function extractAnswerTableEntry(line) {
             const source = String(line || '').trim();
             if (!source) return { kanji: '', hanviet: '', hiragana: '', meaning: '' };
 
-            const kanjiMatches = source.match(/[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF々〆ヶ]+/g) || [];
-            const kanaMatches = source.match(/[ぁ-んァ-ンー]+/g) || [];
-            const hanVietChars = 'A-ZÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬĐÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴ';
-            const upperRe = new RegExp('[' + hanVietChars + ']+(?:[\\s·・]+[' + hanVietChars + ']+)*', 'g');
-            const upperMatches = (source.match(upperRe) || [])
-                .map(s => s.trim())
-                .filter(s => s.replace(/[^A-ZÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬĐÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴ]/g, '').length >= 2);
+            // Parser mới theo cấu trúc:
+            // Từ chính(đọc) ÂM HÁN/KANA/KATAKANA - nghĩa (chú thích)
+            // Quan trọng: phần "nghĩa" được giữ nguyên 100%, kể cả có Kanji/Hiragana/Katakana.
+            const split = answerTableSplitMainMeaning(source);
+            const head = split.head;
+            const meaning = split.hasMeaning ? split.meaning.trim() : '';
 
-            let meaning = source;
+            let termPart = head;
+            let reading = '';
+            let hanviet = '';
 
-            // Ưu tiên phần nghĩa sau dấu "-/–/—/:/：", đúng kiểu mẫu: ÂM HÁN - nghĩa.
-            const meaningSplit = source.split(/\s*(?:-|–|—|:|：)\s*/);
-            if (meaningSplit.length > 1) {
-                meaning = meaningSplit.slice(1).join(' - ').trim();
+            const readingMatch = head.match(/[（(]([^）)]*)[）)]/);
+            if (readingMatch && typeof readingMatch.index === 'number') {
+                termPart = head.slice(0, readingMatch.index).trim();
+                reading = String(readingMatch[1] || '').trim();
+                hanviet = head.slice(readingMatch.index + readingMatch[0].length).trim();
+            } else {
+                const parsedHead = answerTableExtractTrailingHanviet(head);
+                termPart = parsedHead.term;
+                hanviet = parsedHead.hanviet;
             }
 
-            kanjiMatches.forEach(v => { meaning = meaning.replace(v, ' '); });
-            kanaMatches.forEach(v => { meaning = meaning.replace(v, ' '); });
-            upperMatches.forEach(v => { meaning = meaning.replace(v, ' '); });
-            meaning = meaning
-                .replace(/[（）()【】\[\]「」『』]/g, ' ')
-                .replace(/\s*(?:-|–|—|:|：)\s*/g, ' ')
-                .replace(/\s+/g, ' ')
-                .trim();
+            let termDisplay = answerTableNormalizeEntryTerm(termPart);
+            const synonymPair = answerTableExtractSynonymPair(termDisplay);
+            if (synonymPair) {
+                termDisplay = synonymPair.display;
+            }
+
+            let kanji = '';
+            let hiraKata = '';
+
+            // Không tự tách ký tự trong nghĩa/chú thích nữa.
+            // Chỉ dựa vào "từ chính" và "reading" để đổ cột.
+            if (answerTableHasKanji(termDisplay)) {
+                kanji = termDisplay;
+                hiraKata = reading || '';
+            } else if (/[ぁ-んァ-ンー]/.test(termDisplay)) {
+                hiraKata = reading || termDisplay;
+            } else {
+                // Trường hợp từ Latin/số/khác vẫn giữ ở cột Kanji để không mất dữ liệu.
+                kanji = termDisplay;
+                hiraKata = reading || '';
+            }
 
             return {
-                kanji: Array.from(new Set(kanjiMatches)).join('、'),
-                hanviet: Array.from(new Set(upperMatches)).join(' '),
-                hiragana: Array.from(new Set(kanaMatches)).join('、'),
-                meaning: meaning
+                kanji: kanji,
+                hanviet: String(hanviet || '').trim(),
+                hiragana: String(hiraKata || '').trim(),
+                meaning: meaning || (!split.hasMeaning ? '' : meaning)
             };
         }
 
@@ -6096,7 +7667,7 @@
                     "</colgroup>";
             html += "<thead>";
             html += "<tr><th rowspan='2'>Phần</th><th rowspan='2'>Mondai</th><th rowspan='2'>Câu hỏi</th><th rowspan='2'>Đáp án</th><th colspan='4'>Lời giải</th><th rowspan='2'>Ghi chú</th></tr>";
-            html += "<tr class='subhead'><th>Kanji</th><th>Âm Hán</th><th>Hiragana</th><th>Nghĩa</th></tr>";
+            html += "<tr class='subhead'><th>Kanji</th><th>Âm Hán</th><th>Hiragana / Katakana</th><th>Nghĩa</th></tr>";
             html += "</thead><tbody>";
 
             if (!rows.length) {
@@ -6131,7 +7702,7 @@
             aoa.push([String(filename || 'ĐỀ THI').toUpperCase() + ' - BẢNG ĐÁP ÁN + LỜI GIẢI', '', '', '', '', '', '', '', '']);
             merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: 8 } });
             aoa.push(['Phần', 'Mondai', 'Câu hỏi', 'Đáp án', 'Lời giải', '', '', '', 'Ghi chú']);
-            aoa.push(['', '', '', '', 'Kanji', 'Âm Hán', 'Hiragana', 'Nghĩa', '']);
+            aoa.push(['', '', '', '', 'Kanji', 'Âm Hán', 'Hiragana / Katakana', 'Nghĩa', '']);
             merges.push({ s: { r: 1, c: 0 }, e: { r: 2, c: 0 } });
             merges.push({ s: { r: 1, c: 1 }, e: { r: 2, c: 1 } });
             merges.push({ s: { r: 1, c: 2 }, e: { r: 2, c: 2 } });
@@ -6165,7 +7736,7 @@
                     }
                 });
             }
-            return { aoa, merges };
+            return answerExcelCompactSheetData({ aoa, merges });
         }
 
         function buildAnswerExplanationExcelHtml(filename) {
@@ -6181,7 +7752,7 @@
                     td.center { text-align:center; }
                     td.wrap { white-space:normal; word-wrap:break-word; }
                     .col-part{width:12%;}.col-mondai{width:11%;}.col-question{width:10%;}.col-answer{width:8%;}
-                    .col-kanji{width:14%;}.col-hanviet{width:15%;}.col-hiragana{width:15%;}.col-meaning{width:22%;}.col-note{width:30%;}
+                    .col-kanji{width:14%;}.col-hanviet{width:15%;}.col-hiragana{width:17%;}.col-meaning{width:24%;}.col-note{width:32%;}
                 </style></head><body>${tableHtml}</body></html>`;
         }
 
@@ -6223,17 +7794,93 @@
             return String(value || '').replace(/\s+/g, ' ').trim().length;
         }
 
+        function answerExcelCellHasText(value) {
+            return String(value == null ? '' : value)
+                .replace(/\u00A0/g, ' ')
+                .replace(/<br\s*\/?\s*>/gi, ' ')
+                .trim().length > 0;
+        }
+
+        function answerExcelRowHasAnyText(rowValues) {
+            const row = rowValues || [];
+            for (let c = 0; c < 9; c++) {
+                if (answerExcelCellHasText(row[c])) return true;
+            }
+            return false;
+        }
+
+        function answerExcelCompactSheetData(sheetData) {
+            const oldAoa = sheetData.aoa || [];
+            const rowMap = new Map();
+            const aoa = [];
+
+            oldAoa.forEach((rowValues, oldIndex) => {
+                const isHeaderRow = oldIndex <= 2;
+                const cleanRow = Array.from({ length: 9 }, (_, c) => (rowValues && rowValues[c] != null) ? rowValues[c] : '');
+                const keepRow = isHeaderRow || answerExcelRowHasAnyText(cleanRow);
+                if (keepRow) {
+                    rowMap.set(oldIndex, aoa.length);
+                    aoa.push(cleanRow);
+                }
+            });
+
+            const merges = (sheetData.merges || []).map(merge => {
+                const keptRows = [];
+                for (let r = merge.s.r; r <= merge.e.r; r++) {
+                    if (rowMap.has(r)) keptRows.push(rowMap.get(r));
+                }
+                if (!keptRows.length) return null;
+                const nextMerge = {
+                    s: { r: Math.min(...keptRows), c: Math.max(0, Math.min(8, merge.s.c)) },
+                    e: { r: Math.max(...keptRows), c: Math.max(0, Math.min(8, merge.e.c)) }
+                };
+                if (nextMerge.s.r === nextMerge.e.r && nextMerge.s.c === nextMerge.e.c) return null;
+                return nextMerge;
+            }).filter(Boolean);
+
+            return { aoa, merges };
+        }
+
+        function answerExcelVisualLength(value) {
+            return Array.from(String(value || '')).reduce((sum, ch) => {
+                if (/[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF々〆ヶー]/.test(ch)) return sum + 1.75;
+                if (/[A-ZÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬĐÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴ]/.test(ch)) return sum + 1.15;
+                return sum + 1;
+            }, 0);
+        }
+
+        function answerExcelEstimateTextLines(value, colWidth) {
+            const text = String(value || '').replace(/<br\s*\/?\s*>/gi, '\n').replace(/\r/g, '');
+            if (!text.trim()) return 1;
+            const usableWidth = Math.max(8, Number(colWidth || 12) - 2);
+            return text.split(/\n/).reduce((total, line) => {
+                const visualLen = answerExcelVisualLength(line.trim());
+                return total + Math.max(1, Math.ceil(visualLen / usableWidth));
+            }, 0);
+        }
+
         function answerExcelEstimateRowHeight(rowValues, rowIndex) {
-            if (rowIndex === 0) return { hpt: 30 };
-            if (rowIndex === 1) return { hpt: 24 };
-            if (rowIndex === 2) return { hpt: 24 };
-            const lengths = (rowValues || []).map(answerExcelTextLength);
-            const maxLen = lengths.length ? Math.max(...lengths) : 0;
-            if (maxLen > 140) return { hpt: 64 };
-            if (maxLen > 95) return { hpt: 52 };
-            if (maxLen > 55) return { hpt: 40 };
-            if (maxLen > 28) return { hpt: 30 };
-            return { hpt: 22 };
+            if (rowIndex === 0) return { hpt: 32 };
+            if (rowIndex === 1 || rowIndex === 2) return { hpt: 26 };
+
+            const colWidths = [17, 13, 12, 10, 18, 20, 22, 36, 46];
+            const values = rowValues || [];
+            let maxLines = 1;
+
+            // Ưu tiên vùng lời giải: Kanji / Âm Hán / Hiragana-Katakana / Nghĩa / Ghi chú
+            for (let c = 4; c <= 8; c++) {
+                maxLines = Math.max(maxLines, answerExcelEstimateTextLines(values[c], colWidths[c]));
+            }
+
+            // Nếu câu hỏi/phần/mondai dài bất thường thì vẫn tự nâng chiều cao dòng.
+            for (let c = 0; c <= 3; c++) {
+                maxLines = Math.max(maxLines, answerExcelEstimateTextLines(values[c], colWidths[c]));
+            }
+
+            const hasExplanationText = values.slice(4, 9).some(v => String(v || '').trim());
+            const minHeight = hasExplanationText ? 26 : 22;
+            const estimated = 18 + maxLines * 13;
+            return { hpt: Math.min(150, Math.max(minHeight, estimated)) };
         }
 
         function styleAnswerExplanationWorksheet(ws, sheetData) {
@@ -6250,11 +7897,11 @@
                 { wch: 10 },
                 { wch: 18 },
                 { wch: 20 },
-                { wch: 20 },
-                { wch: 28 },
-                { wch: 38 }
+                { wch: 22 },
+                { wch: 36 },
+                { wch: 46 }
             ];
-            ws['!rows'] = aoa.map(answerExcelEstimateRowHeight);
+            ws['!rows'] = aoa.map((rowValues, rowIndex) => answerExcelEstimateRowHeight(rowValues, rowIndex));
             ws['!margins'] = { left: 0.3, right: 0.3, top: 0.45, bottom: 0.45, header: 0.2, footer: 0.2 };
             ws['!autofilter'] = { ref: 'A3:I' + Math.max(rowCount, 3) };
             ws['!freeze'] = { xSplit: 0, ySplit: 3, topLeftCell: 'A4', activePane: 'bottomLeft', state: 'frozen' };
@@ -6304,22 +7951,16 @@
                 alignment: answerExcelAlign('left'),
                 border: baseBorder
             };
-            const styleEmpty = {
-                font: answerExcelFont({ bold: false, color: '6B7280', size: 11 }),
-                alignment: answerExcelAlign('center'),
-                border: baseBorder
-            };
-
             for (let r = 0; r < rowCount; r++) {
                 for (let c = 0; c < colCount; c++) {
                     const addr = answerExcelEncodeCell(r, c);
                     if (!ws[addr]) ws[addr] = { t: 's', v: '' };
                     ws[addr].t = 's';
                     ws[addr].v = String(ws[addr].v || '');
+                    const cellText = String(ws[addr].v || '').trim();
                     if (r === 0) ws[addr].s = styleTitle;
                     else if (r === 1) ws[addr].s = styleMainHeader;
                     else if (r === 2) ws[addr].s = (c >= 4 && c <= 7) ? styleSubHeader : styleMainHeader;
-                    else if (!String(ws[addr].v || '').trim() && c >= 4 && c <= 8) ws[addr].s = (c === 8 ? styleNoteBody : styleEmpty);
                     else if (c <= 2) ws[addr].s = styleCenterBody;
                     else if (c === 3) ws[addr].s = styleAnswerBody;
                     else if (c >= 4 && c <= 6) ws[addr].s = styleVocabBody;
@@ -6337,6 +7978,15 @@
                         if (!ws[addr]) ws[addr] = { t: 's', v: '' };
                         ws[addr].s = startStyle;
                     }
+                }
+            });
+
+            // Chỉ giữ đúng phạm vi bảng A:I. Mọi ô/cột phát sinh ngoài I bị xóa sạch khỏi worksheet.
+            Object.keys(ws).forEach(key => {
+                if (!/^[A-Z]+[0-9]+$/.test(key)) return;
+                const decoded = XLSX.utils.decode_cell(key);
+                if (decoded.c > 8 || decoded.r >= rowCount) {
+                    delete ws[key];
                 }
             });
         }
@@ -6373,6 +8023,91 @@
             document.body.removeChild(link);
         }
 
+        function unwrapAIBlockHtmlForExport(html, options = {}) {
+            const removeAITitle = options.removeAITitle !== false;
+            const holder = document.createElement('div');
+
+            holder.innerHTML = stripFuriganaHtml(html || '');
+
+            holder.querySelectorAll('.ai-generated-block, [data-ai-block]').forEach(block => {
+                if (removeAITitle) {
+                    const firstB = block.querySelector('b');
+                    if (firstB && /^AI\s+/i.test((firstB.textContent || '').trim())) {
+                        let next = firstB.nextSibling;
+                        firstB.remove();
+
+                        if (next && next.nodeType === Node.ELEMENT_NODE && next.tagName === 'BR') {
+                            next.remove();
+                        }
+                    }
+                }
+
+                const frag = document.createDocumentFragment();
+
+                while (block.firstChild) {
+                    frag.appendChild(block.firstChild);
+                }
+
+                block.replaceWith(frag);
+            });
+
+            return holder.innerHTML;
+        }
+
+        function sanitizeTeacherLineHtml(html) {
+            const holder = document.createElement('div');
+            holder.innerHTML = unwrapAIBlockHtmlForExport(html || '', { removeAITitle: true });
+
+            holder.querySelectorAll('*').forEach(el => {
+                const tag = el.tagName.toLowerCase();
+
+                Array.from(el.attributes || []).forEach(attr => {
+                    if (/^on/i.test(attr.name)) el.removeAttribute(attr.name);
+                    if (['class', 'data-ai-block', 'style', 'contenteditable', 'placeholder'].includes(attr.name)) {
+                        el.removeAttribute(attr.name);
+                    }
+                });
+
+                if (tag === 'strong') {
+                    const b = document.createElement('b');
+                    b.innerHTML = el.innerHTML;
+                    el.replaceWith(b);
+                    return;
+                }
+
+                if (tag === 'em') {
+                    const i = document.createElement('i');
+                    i.innerHTML = el.innerHTML;
+                    el.replaceWith(i);
+                    return;
+                }
+
+                if (!['b', 'u', 'i', 'br'].includes(tag)) {
+                    const frag = document.createDocumentFragment();
+
+                    if (tag === 'div' || tag === 'p') {
+                        while (el.firstChild) frag.appendChild(el.firstChild);
+                        frag.appendChild(document.createElement('br'));
+                    } else {
+                        while (el.firstChild) frag.appendChild(el.firstChild);
+                    }
+
+                    el.replaceWith(frag);
+                }
+            });
+
+            let result = holder.innerHTML;
+
+            result = result
+                .replace(/(&nbsp;|\s)+/g, ' ')
+                .replace(/\s*<br\s*\/?>\s*/gi, '<br>')
+                .replace(/^(<br\s*\/?>|\s)+/gi, '')
+                .replace(/(<br\s*\/?>|\s)+$/gi, '')
+                .trim();
+
+            return result;
+        }
+
         function generateHtmlForPrintOrExport(isAnswerKey, addPartTitles = false, forWordDoc = true, includeAnswerExplanationTable = false) {
             let html = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns:v='urn:schemas-microsoft-com:vml' xmlns='http://www.w3.org/TR/REC-html40'>";
             html += "<head><meta charset='utf-8'><style>";
@@ -6391,6 +8126,7 @@
             html += ".options-export-table td { border:none !important; padding-top:0pt; padding-bottom:0pt; } ";
             html += ".answer-line { margin-top:0pt !important; margin-bottom:0pt !important; line-height:1.3; } ";
             html += ".explanation-line { margin-top:0pt !important; margin-bottom:1.3pt !important; line-height:1.3; font-style:italic; color:#b91c1c; } ";
+            html += ".note-line { margin-top:0pt !important; margin-bottom:4pt !important; line-height:1.3; font-style:italic; color:#075985; } ";
             html += "ruby.furigana-ruby, ruby { ruby-align:center; } ruby.furigana-ruby rt, ruby rt { font-size:6pt; color:#000000; font-weight:400; } ";
             html += ".passage-question-blank, .section-title-question-blank { display:inline-block; min-width:52px; padding:1px 8px; margin:0 2px; border:1px solid #2563eb; border-radius:6px; background:#eff6ff; color:#1d4ed8; font-weight:700; text-align:center; white-space:nowrap; vertical-align:baseline; } ";
             html += ".rte-textbox { box-sizing:border-box; max-width:100%; } .rte-textbox-body { box-sizing:border-box; } .rte-textbox-handle, .rte-resize-handle { display:none !important; } ";
@@ -6419,7 +8155,6 @@
             let teacherMondaiPartCounter = 0;
 
             examSections.forEach((sec, sIdx) => {
-                // BẢN HỌC SINH: giữ cơ chế tiêu đề phần lớn cũ, không đụng định dạng bài xếp sao.
                 if (!isAnswerKey && addPartTitles && sec.parentType !== lastExportPart) {
                     exportPartCounter++;
                     const partTitle = exportPartLabels[sec.parentType] || "";
@@ -6431,8 +8166,6 @@
 
                 let safeTitle = prepareInlineHtmlForExport(isAnswerKey ? stripFuriganaHtml(refreshSectionTitleBlankLabels(sec.title || '', sec)) : refreshSectionTitleBlankLabels(sec.title || '', sec));
 
-                // BẢN GIÁO VIÊN: Phần I/II/III... nằm cùng dòng với tiêu đề 問題, không xuống hàng.
-                // Không kèm nhãn 文字・語彙 / 文法 / 読解 / 聴解 để dễ đưa lên Azota.
                 if (isAnswerKey && addPartTitles) {
                     teacherMondaiPartCounter++;
                     safeTitle = "Phần " + getRomanNumeral(teacherMondaiPartCounter) + ". " + safeTitle;
@@ -6462,12 +8195,9 @@
                                 for(let i=0; i<parts.length-1; i++) {
                                     newText += parts[i];
                                     if (isAnswerKey) {
-                                        // BẢN GIÁO VIÊN/AZOTA: ô trống là ký tự thật "_____";
-                                        // vị trí sao là "_____★_____", riêng ngôi sao vẫn được underline.
                                         if (i === starPos - 1) newText += "&nbsp;<span class='azota-star-slot'><u>___★___</u></span>&nbsp;";
                                         else newText += "&nbsp;<span class='azota-star-slot'>_______</span>&nbsp;";
                                     } else {
-                                        // BẢN HỌC SINH: giữ nguyên kiểu underline cũ, không đổi sang ký tự "_____".
                                         if (i === starPos - 1) newText += "&nbsp;&nbsp;&nbsp;<u>　★　</u>&nbsp;&nbsp;&nbsp;";
                                         else newText += "&nbsp;&nbsp;&nbsp;<u>　　　</u>&nbsp;&nbsp;&nbsp;";
                                     }
@@ -6476,13 +8206,11 @@
                             }
                         }
 
-                        // Token bài xếp sao: học sinh giữ underline; giáo viên đổi sang ký tự thật cho Azota.
                         safeText = safeText.replace(/   ＿★＿   /g, isAnswerKey ? "&nbsp;<span class='azota-star-slot'><u>___★___</u></span>&nbsp;" : "&nbsp;&nbsp;&nbsp;<u>　★　</u>&nbsp;&nbsp;&nbsp;");
                         safeText = safeText.replace(/   ＿＿＿   /g, isAnswerKey ? "&nbsp;<span class='azota-star-slot'>_______</span>&nbsp;" : "&nbsp;&nbsp;&nbsp;<u>　　　</u>&nbsp;&nbsp;&nbsp;");
                         safeText = safeText.replace(/&lt;b&gt;/gi, "<b>").replace(/&lt;\/b&gt;/gi, "</b>");
                         safeText = safeText.replace(/&lt;u&gt;/gi, "<u>").replace(/&lt;\/u&gt;/gi, "</u>");
                         safeText = restoreRubyTagsAfterEscaping(safeText);
-                        // --- CHO PHÉP CÂU HỎI NHIỀU DÒNG (XUẤT WORD CHUẨN) ---
                         safeText = safeText.replace(/&lt;br\s*\/?&gt;/gi, "<br>");
                         safeText = safeText.replace(/&lt;div[^&]*&gt;/gi, "<br>").replace(/&lt;\/div&gt;/gi, "");
                         safeText = safeText.replace(/&lt;p[^&]*&gt;/gi, "<br>").replace(/&lt;\/p&gt;/gi, "");
@@ -6494,21 +8222,27 @@
 
                         html += renderOptionsForExport(sec, q, isAnswerKey);
 
-                        // Bản giáo viên chỉ tô đỏ đáp án đúng trong lựa chọn, không thêm dòng ghi chú Đáp án bên dưới.
+                        // --- CHUẨN HOÁ FORM LỜI GIẢI GV: KHÔNG LỘ <div>, KHÔNG LỘ DATA-AI, CHỈ GIỮ NỘI DUNG SẠCH ---
+                        let cleanExp = sanitizeTeacherLineHtml(q.explanation || '');
+                        let cleanNote = sanitizeTeacherLineHtml(q.note || '');
 
-                        if (isAnswerKey && q.explanation && q.explanation.trim() !== "") {
-                            let safeExp = stripFuriganaHtml(q.explanation).replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
-                            safeExp = safeExp.replace(/&lt;b&gt;/gi, "<b>").replace(/&lt;\/b&gt;/gi, "</b>");
-                            safeExp = safeExp.replace(/&lt;u&gt;/gi, "<u>").replace(/&lt;\/u&gt;/gi, "</u>");
-                            
-                            safeExp = safeExp.replace(/&lt;br\s*\/?&gt;/gi, "<br>");
-                            safeExp = safeExp.replace(/&lt;div[^&]*&gt;/gi, "<br>").replace(/&lt;\/div&gt;/gi, "");
-                            safeExp = safeExp.replace(/&lt;p[^&]*&gt;/gi, "<br>").replace(/&lt;\/p&gt;/gi, "");
+                        let hasExplanation = cleanExp.trim() !== "";
+                        let hasNote = cleanNote.trim() !== "";
 
-                            html += "<p class='explanation-line'><b>Lời giải:</b> " + safeExp + "</p>";
+                        if (isAnswerKey && (hasExplanation || hasNote)) {
+                            let combinedText = "<br>";
+
+                            if (hasExplanation) {
+                                combinedText += `<span style="color:#b91c1c;">${cleanExp}</span>`;
+                            }
+
+                            if (hasNote) {
+                                if (hasExplanation) combinedText += "<br><br>";
+                                combinedText += `<span style="color:#075985;"><b>* Ghi chú:</b> ${cleanNote}</span>`;
+                            }
+
+                            html += `<p class='explanation-line'><b>Lời giải:</b>${combinedText}</p>`;
                         }
-
-                        html += "</div>";
                     });
                 });
             });
@@ -6517,7 +8251,7 @@
                 html += buildAnswerExplanationTableHtml(filename);
             }
 
-            html += "<" + "/body><" + "/html>"; return html;
+            html += "</body></html>"; return html;
         }
 
         function executeExport(type) {
@@ -6608,7 +8342,8 @@
 
             let btnsHTML = `<button class="action-btn btn-add-q" onclick="addQuestionToGroup(${sec.groups.length - 1})" title="Nhập số lượng câu hỏi cần tạo">+ Thêm Câu Hỏi (Hàng loạt)</button>`;
             if (sec.features.isGrouped) btnsHTML += `<button class="action-btn btn-add-g" onclick="addGroupToCurrentSection()" title="Nhập số lượng bài đọc cần tạo">📑 + Thêm Bài Đọc (hàng loạt)</button>`;
-            
+            btnsHTML += `<button class="action-btn" style="background: linear-gradient(135deg, #8b5cf6, #ec4899); color: white;" onclick="openAIImportModal()">🔮 Nạp Câu Hỏi Từ Gemini AI</button>`;
+            btnsHTML += getGeminiSettingsPanelHtml();
             btnsHTML += `
                 <button class="action-btn btn-bulk" onclick="openBulkModal()">📝 Nhập Lời Giải Nhanh (hàng loạt)</button>
                 <button class="action-btn btn-ans-bulk" onclick="openBulkAnsModal()">✅ Nhập Đáp Án Nhanh (hàng loạt)</button>
@@ -6747,41 +8482,221 @@
 
         function cleanHtmlGarbage(html) {
             if (!html) return "";
-            let text = String(html);
 
-            // 1. Chuyển các thẻ HTML bị mã hóa dạng chữ (&lt;br&gt;, &lt;div&gt;) về thẻ thật để dễ xử lý
-            text = text.replace(/&lt;br\s*\/?&gt;/gi, '<br>')
-                       .replace(/&lt;\/?div[^&]*&gt;/gi, '<br>')
-                       .replace(/&lt;\/?p[^&]*&gt;/gi, '<br>');
+            const holder = document.createElement('div');
 
-            // --- BƯỚC MỚI: LỘT VỎ CÁC THẺ SPAN, FONT RÁC ---
-            // Dùng DOM Parser để an toàn bóc tách các thẻ mang theo style từ Word/Web
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = text;
-            
-            // Tìm tất cả các thẻ span (nhưng CHỪA LẠI các ô trống điền từ của bài đọc hiểu) và thẻ font
-            tempDiv.querySelectorAll('span:not(.passage-question-blank):not(.section-title-question-blank), font').forEach(el => {
+            let text = String(html)
+                .replace(/&lt;br\s*\/?&gt;/gi, '<br>')
+                .replace(/&lt;(\/?)(b|u|i|strong|em|ruby|rt|rp|rb|span|div|p)([^&]*)&gt;/gi, '<$1$2$3>');
+
+            holder.innerHTML = text;
+
+            holder.querySelectorAll('.ai-generated-block, [data-ai-block]').forEach(block => {
+                const firstB = block.querySelector('b');
+
+                if (firstB && /^AI\s+/i.test((firstB.textContent || '').trim())) {
+                    let next = firstB.nextSibling;
+                    firstB.remove();
+
+                    if (next && next.nodeType === Node.ELEMENT_NODE && next.tagName === 'BR') {
+                        next.remove();
+                    }
+                }
+
                 const frag = document.createDocumentFragment();
-                // Chuyển toàn bộ chữ bên trong ra ngoài
-                while (el.firstChild) { frag.appendChild(el.firstChild); }
-                // Xóa vỏ thẻ span/font đi, thế chỗ bằng chữ
-                el.replaceWith(frag);
+
+                while (block.firstChild) {
+                    frag.appendChild(block.firstChild);
+                }
+
+                block.replaceWith(frag);
             });
-            text = tempDiv.innerHTML;
-            // ---------------------------------------------
 
-            // 2. Xóa các khoảng trắng HTML vô nghĩa
-            text = text.replace(/&nbsp;/g, ' ');
+            holder.querySelectorAll('*').forEach(el => {
+                const tag = el.tagName.toLowerCase();
 
-            // 3. Vòng lặp gọt bỏ sạch sẽ mọi thẻ <br>, <div>, <p> và khoảng trắng nằm ở TẬN CÙNG đuôi chuỗi
-            let prev;
-            do {
-                prev = text;
-                text = text.replace(/(<br\s*\/?>|<\/?div[^>]*>|<\/?p[^>]*>|\s)+$/gi, '');
-            } while (prev !== text);
+                Array.from(el.attributes || []).forEach(attr => {
+                    if (/^on/i.test(attr.name)) el.removeAttribute(attr.name);
+                });
 
-            // 4. Trả về text đã được trim gọn gàng hai đầu
-            return text.trim();
+                const isProtectedBlank =
+                    el.classList.contains('passage-question-blank') ||
+                    el.classList.contains('section-title-question-blank');
+
+                const isRubyTag = ['ruby', 'rt', 'rp', 'rb'].includes(tag);
+                const isBasicFormat = ['b', 'u', 'i', 'strong', 'em', 'br'].includes(tag);
+
+                if (tag === 'span' && isProtectedBlank) return;
+                if (isRubyTag || isBasicFormat) return;
+
+                if (tag === 'span' || tag === 'font') {
+                    const frag = document.createDocumentFragment();
+
+                    while (el.firstChild) {
+                        frag.appendChild(el.firstChild);
+                    }
+
+                    el.replaceWith(frag);
+                }
+            });
+
+            let result = holder.innerHTML;
+
+            result = result
+                .replace(/&nbsp;/g, ' ')
+                .replace(/\s*<br\s*\/?>\s*/gi, '<br>')
+                .replace(/(<br\s*\/?>){3,}/gi, '<br><br>');
+
+            while (/(<br\s*\/?>|\s)+$/i.test(result)) {
+                result = result.replace(/(<br\s*\/?>|\s)+$/i, '');
+            }
+
+            return result.trim();
+        }
+
+        // ==========================================
+        // THƯ VIỆN LOGIC XỬ LÝ NHẬN DIỆN GEMINI AI IMPORTER
+        // ==========================================
+        function openAIImportModal() {
+            if (activeSectionIndex === -1 || !examSections[activeSectionIndex]) {
+                alert("Cậu vui lòng chọn hoặc tạo một Tab Mondai trước khi nạp câu hỏi nhé!");
+                return;
+            }
+            document.getElementById('ai-import-textarea').value = '';
+            document.getElementById('ai-import-modal').style.display = 'flex';
+            setTimeout(() => document.getElementById('ai-import-textarea').focus(), 150);
+        }
+
+        function executeAIParser() {
+            const textRaw = document.getElementById('ai-import-textarea').value;
+            if (!textRaw.trim()) {
+                alert("Khung text đang trống, cậu chưa dán câu hỏi từ AI vào kìa!");
+                return;
+            }
+
+            // Tách các câu hỏi bằng tag [CÂU] hoặc [CAU]
+            const rawBlocks = textRaw.split(/\[CÂU\]|\[CAU\]/i);
+            const parsedQuestions = [];
+
+            rawBlocks.forEach(block => {
+                if (!block.trim()) return;
+
+                // 1. Cắt khối bằng Regex chuẩn (chấp nhận AI lỡ gõ khoảng trắng đầu dòng)
+                const blockA = block.split(/^[ \t]*[AＡ][.．]/m);
+                if (blockA.length < 2) return; 
+                let questionText = blockA[0].trim();
+                
+                const blockB = blockA[1].split(/^[ \t]*[BＢ][.．]/m);
+                if (blockB.length < 2) return;
+                let optA = blockB[0].trim();
+                
+                const blockC = blockB[1].split(/^[ \t]*[CＣ][.．]/m);
+                if (blockC.length < 2) return;
+                let optB = blockC[0].trim();
+                
+                const blockD = blockC[1].split(/^[ \t]*[DＤ][.．]/m);
+                if (blockD.length < 2) return;
+                let optC = blockD[0].trim();
+                
+                const blockAns = blockD[1].split(/\[ĐÁP ÁN\]|\[DAP AN\]/i);
+                if (blockAns.length < 2) return;
+                let optD = blockAns[0].trim();
+                
+                const blockExp = blockAns[1].split(/\[GIẢI\]|\[GIAI\]/i);
+                if (blockExp.length < 2) return;
+                // Bắt chuẩn 1 ký tự A, B, C, hoặc D
+                let correctAns = blockExp[0].replace(/[^A-D]/gi, '').toUpperCase().trim();
+                
+                const blockNote = blockExp[1].split(/\[MẸO\]|\[MEO\]/i);
+                let explanationText = blockNote[0].trim();
+                let noteText = blockNote.length > 1 ? blockNote[1].trim() : "";
+
+                // ==========================================
+                // 🌟 BỘ LỌC THÔNG MINH: TỰ SỬA LỖI AI 🌟
+                // ==========================================
+                // 2.1 Bóc "Giải thích:" khỏi "[GIẢI]" chuyển sang "[MẸO]"
+                const explainKeywordMatch = explanationText.match(/(?:Giải thích|Giải thích chi tiết|Phân tích)[\s]*[:：]/i);
+                if (explainKeywordMatch) {
+                    const extraNote = explanationText.substring(explainKeywordMatch.index + explainKeywordMatch[0].length).trim();
+                    noteText = extraNote + (noteText ? "<br><br><b>[Mẹo/Ghi chú]:</b><br>" + noteText : "");
+                    explanationText = explanationText.substring(0, explainKeywordMatch.index).trim();
+                }
+                
+                // 2.2 Gọt rác "Từ vựng:" ở đầu dòng lời giải
+                explanationText = explanationText.replace(/^(?:Từ vựng)[\s]*[:：]/i, '').trim();
+                                
+                // 2.3 Chuyển mọi dấu xuống dòng trong ô [GIẢI] thành dấu ; để xuất Excel tách dòng sạch sẽ
+                explanationText = explanationText.replace(/\n/g, ' ; ').replace(/(<br>\s*)+/g, ' ; ').replace(/\s+;\s+/g, ' ; ');
+                // ==========================================
+
+                // 3. Xử lý UI và trích xuất dữ liệu ngầm (Underline / Star)
+                questionText = questionText.replace(/\n/g, '<br>').replace(/(<br>\s*)+/g, '<br>');
+
+                let underlineVal = "";
+                const underlineMatch = questionText.match(/<b><u>(.*?)<\/u><\/b>/i);
+                if (underlineMatch) underlineVal = underlineMatch[1].trim();
+
+                let starPosVal = "";
+                // Bắt chuẩn khoảng trắng HTML và khoảng trắng thường
+                const starTokens = questionText.match(/(?: |&nbsp;| ){3}＿(?:＿|★)＿(?: |&nbsp;| ){3}/g);
+                if (starTokens) {
+                    const sIdx = starTokens.findIndex(t => t.includes('★'));
+                    if (sIdx !== -1) starPosVal = (sIdx + 1).toString();
+                    questionText = questionText.replace(/((?: |&nbsp;| ){3}＿)★(＿(?: |&nbsp;| ){3})/g, '$1＿$2');
+                }
+
+                parsedQuestions.push({
+                    id: 0,
+                    text: questionText,
+                    image: "",
+                    underline: underlineVal,
+                    starPosition: starPosVal,
+                    explanation: explanationText,
+                    note: noteText,
+                    options: [optA, optB, optC, optD],
+                    correct: correctAns.charAt(0) 
+                });
+            });
+
+            if (parsedQuestions.length === 0) {
+                alert("Hệ thống không nhận diện được câu hỏi nào. Cậu kiểm tra lại xem dữ liệu có thiếu tag [CÂU] hoặc các đáp án A. B. C. D. không nhé!");
+                return;
+            }
+
+            closeModals();
+
+            // 4. Bơm dữ liệu vào hệ thống Web
+            showLoadingScreen(`🔮 AI đang nạp thành công ${parsedQuestions.length} câu hỏi...`, 800, () => {
+                const currentSec = examSections[activeSectionIndex];
+                const currentGroupIdx = currentSec.groups.length - 1; 
+                
+                // Ghi đè câu trống đầu tiên nếu là Tab mới tạo
+                const firstQ = currentSec.groups[currentGroupIdx].questions[0];
+                if (currentSec.groups[currentGroupIdx].questions.length === 1 && !firstQ.text && !firstQ.options[0]) {
+                    currentSec.groups[currentGroupIdx].questions = parsedQuestions;
+                } else {
+                    currentSec.groups[currentGroupIdx].questions = currentSec.groups[currentGroupIdx].questions.concat(parsedQuestions);
+                }
+
+                initApp();
+                
+                // Tự động kích hoạt hiển thị gạch chân & dấu sao trên UI cho các câu vừa nạp
+                const startIdx = currentSec.groups[currentGroupIdx].questions.length - parsedQuestions.length;
+                parsedQuestions.forEach((q, idx) => {
+                    const actualQIdx = startIdx + idx;
+                    reapplyStarPosition(currentGroupIdx, actualQIdx);
+                    reapplyUnderlineFormat(currentGroupIdx, actualQIdx);
+                });
+
+                forceAutoSave();
+                showRTEToast(`✨ Thần kỳ rứa! Đã nạp xong ${parsedQuestions.length} câu hỏi bằng AI.`);
+                
+                // Cuộn màn hình mượt mà xuống cuối cùng
+                setTimeout(() => {
+                    const container = document.getElementById('editor-container');
+                    container.scrollTop = container.scrollHeight;
+                }, 100);
+            });
         }
     </script>
 </body>
