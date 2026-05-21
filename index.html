@@ -1586,13 +1586,13 @@
     <div id="ai-import-modal" class="modal-overlay">
         <div class="modal-content" style="width: 700px;">
             <h3 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center; color: #8b5cf6;">
-                <span>✨ Trợ Lý Nhập Liệu Gemini AI</span>
+                <span>✨ Trợ Lý Nhập Liệu ChatGPT AI</span>
             </h3>
             <div style="font-size: 13px; color: #4c1d95; background: #f5f3ff; padding: 10px; border-radius: 6px; margin-bottom: 15px; border: 1px solid #c4b5fd;">
-                💡 <b>Hướng dẫn:</b> Tạo đề từ Gemini theo cấu trúc Prompt chuẩn, copy toàn bộ nội dung câu hỏi rồi dán vào khung bên dưới. Hệ thống sẽ tự phân tích và nạp trực tiếp vào <b>Mondai hiện tại</b> cậu đang mở!
+                💡 <b>Hướng dẫn:</b> Tạo đề từ ChatGPT AI theo cấu trúc Prompt chuẩn, copy toàn bộ nội dung câu hỏi rồi dán vào khung bên dưới. Hệ thống sẽ tự phân tích và nạp trực tiếp vào <b>Mondai hiện tại</b> cậu đang mở!
             </div>
             
-            <textarea id="ai-import-textarea" placeholder="Dán nội dung câu hỏi từ Gemini AI vào đây...&#10;[CÂU] 昨日は <b><u>海岸</u></b> へ行きました。&#10;A. かいがん&#10;B. うみ..."></textarea>
+            <textarea id="ai-import-textarea" placeholder="Dán nội dung câu hỏi từ ChatGPT AI vào đây...&#10;[CÂU] 昨日は <b><u>海岸</u></b> へ行きました。&#10;A. かいがん&#10;B. うみ..."></textarea>
             
             <div style="display: flex; gap: 10px; justify-content: flex-end; padding-top: 15px; border-top: 1px solid var(--border-color);">
                 <button class="action-btn" style="background: #e2e8f0; color: #334155;" onclick="closeModals()">Hủy</button>
@@ -1623,7 +1623,23 @@
             <h3 style="margin-top: 0; margin-bottom: 20px;">Tùy Chọn Xuất Đề Thi</h3>
             <div class="export-menu-btn" onclick="executeExport('student')">
                 <div class="icon">📄</div>
-                <div class="info"><b>Xuất file Học Sinh + Excel đáp án</b><span>Tải cùng lúc file Word đề học sinh và file Excel bảng đáp án + lời giải.</span></div>
+                <div class="info"><b>Xuất file Học Sinh / Excel đáp án</b><span>Có thể bật/tắt Word và Excel; mặc định tải cùng lúc cả 2 file.</span></div>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin: -2px 0 12px 0;">
+                <div class="toggle-container" style="margin-top:0;" title="Bật/tắt tải file Word đề học sinh khi xuất">
+                    <span>📄 Word học sinh</span>
+                    <label class="switch">
+                        <input type="checkbox" id="export-student-word-toggle" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="toggle-container" style="margin-top:0;" title="Bật/tắt tải file Excel bảng đáp án + lời giải khi xuất">
+                    <span>📊 Excel đáp án</span>
+                    <label class="switch">
+                        <input type="checkbox" id="export-student-excel-toggle" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
             </div>
             <div class="export-menu-btn" onclick="executeExport('teacher')">
                 <div class="icon">✅</div>
@@ -2222,10 +2238,14 @@
           2. Kanji + Kana: 食べる, 読みます, 受け取る...
           3. Hiragana có nghĩa từ vựng: たくさん, いつも, すぐ, とても, まだ, もう, ぜひ, はかる...
           4. Katakana có nghĩa từ vựng: テスト, アルバイト, コンビニ, ルール, スポーツ...
+        - FORMAT XUẤT RA Ô TỪ VỰNG phải tương thích 100% với prompt ChatGPT/Azota:
+          + Có Kanji: Kanji (hiragana) ÂM HÁN - nghĩa. Ví dụ: 通勤 (つうきん) THÔNG CẦN - đi làm.
+          + Thuần Hiragana/Katakana: hiragana/katakana - nghĩa. Ví dụ: たくさん - nhiều; スポーツ - thể thao.
+          + Tuyệt đối không xuất: にほん (にほん) KANA, スポーツ (スポーツ) KATAKANA, hoặc dòng phiên âm thừa.
         - Với Hiragana/Katakana thuần:
           + "surface" ghi nguyên dạng xuất hiện.
-          + "reading" để trống, trừ khi thật sự cần.
-          + "hanviet" để trống nếu không có âm Hán.
+          + "reading" bắt buộc để trống.
+          + "hanviet" bắt buộc để trống.
         - Với Kanji/Kanji+Kana:
           + "surface" ghi nguyên dạng xuất hiện.
           + "reading" ghi hiragana nếu chắc.
@@ -2236,8 +2256,9 @@
           + "usage_note" ghi dấu hiệu dùng nhanh: đi với trợ từ nào, sắc thái, văn nói/văn viết, hay nhầm với từ nào.
         - TỪ ĐỒNG NGHĨA / GẦN NGHĨA:
           + Nếu có cặp đồng nghĩa/gần nghĩa trong đề, chỉ tạo 1 mục duy nhất cho cả cặp.
-          + Ví dụ có 単純 và わかりやすい thì chỉ trả 1 item: surface="単純", synonym_of="わかりやすい".
-          + Nếu Gemini thấy chiều ngược lại わかりやすい=単純 thì vẫn chỉ tính là 1 cặp, không tạo thêm item thứ hai.
+          + Format hiển thị chỉ lấy cặp: A ＝ B - nghĩa chung ngắn. Không liệt kê riêng A, không liệt kê riêng B.
+          + Ví dụ có 単純 và わかりやすい thì chỉ trả 1 item: surface="単純", synonym_of="わかりやすい", meaning_vi="đơn giản, dễ hiểu".
+          + Nếu AI thấy chiều ngược lại わかりやすい=単純 thì vẫn chỉ tính là 1 cặp, không tạo thêm item thứ hai.
           + Khi một cặp đã được trả, TUYỆT ĐỐI không liệt kê riêng từng từ trong cặp nữa.
           + Nếu một bên có Kanji và một bên là Hiragana/Katakana, ưu tiên bên có Kanji làm "surface", bên còn lại làm "synonym_of".
           + Nếu cả hai đều Kanji hoặc đều Kana, giữ thứ tự xuất hiện tự nhiên trong đề.
@@ -2443,35 +2464,48 @@
                 return 'Không phát hiện từ vựng chắc chắn trong dữ liệu đã cho.';
             }
 
+            const hasJapaneseKanaOnly = (value) => /^[ぁ-んァ-ンー・･\s]+$/.test(String(value || '').trim());
+            const hasJapaneseKanaOrKanji = (value) => /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF々〆ヶぁ-んァ-ンー]/.test(String(value || ''));
+
             return items.map(item => {
                 const surfaceRaw = String(item.surface || '').trim();
                 const readingRaw = String(item.reading || '').trim();
+                const hanvietRaw = String(item.hanviet || '').trim();
                 const synonymRaw = String(item.synonym_of || item.synonym || item.equal_to || '').trim();
-                const usageRaw = String(item.usage_note || item.quick_sign || '').trim();
 
                 const displaySurfaceRaw = buildVocabSurfaceDisplay(surfaceRaw, synonymRaw);
+                if (!displaySurfaceRaw) return '';
+
+                const isSynonymPair = /[=＝]/.test(displaySurfaceRaw) || !!synonymRaw;
+                const meaning = item.meaning_vi ? ` - ${answerTableEscapeHtml(item.meaning_vi)}` : '';
+
+                if (isSynonymPair) {
+                    // Từ đồng nghĩa: chỉ lấy cặp A ＝ B, không thêm phiên âm/âm Hán riêng từng từ.
+                    return `${answerTableEscapeHtml(displaySurfaceRaw)}${meaning}`;
+                }
+
                 const surface = answerTableEscapeHtml(displaySurfaceRaw);
+                const isKanjiItem = hasKanjiForSynonymDisplay(displaySurfaceRaw);
+                const isPureKana = hasJapaneseKanaOnly(displaySurfaceRaw) && hasJapaneseKanaOrKanji(displaySurfaceRaw);
 
-                // Tránh lặp: たくさん(たくさん), テスト(テスト), hoặc lặp phần đã có trong cặp đồng nghĩa.
-                const reading = readingRaw &&
-                    normalizeAIDedupeText(readingRaw) !== normalizeAIDedupeText(surfaceRaw) &&
-                    !normalizeAIDedupeText(displaySurfaceRaw).includes(normalizeAIDedupeText(readingRaw))
-                    ? `(${answerTableEscapeHtml(readingRaw)})`
-                    : '';
+                if (isKanjiItem) {
+                    const reading = readingRaw &&
+                        normalizeAIDedupeText(readingRaw) !== normalizeAIDedupeText(surfaceRaw) &&
+                        !normalizeAIDedupeText(displaySurfaceRaw).includes(normalizeAIDedupeText(readingRaw))
+                        ? ` (${answerTableEscapeHtml(readingRaw)})`
+                        : '';
 
-                const hanviet = item.hanviet
-                    ? ` ${answerTableEscapeHtml(String(item.hanviet).toUpperCase())}`
-                    : '';
+                    const hanviet = hanvietRaw ? ` ${answerTableEscapeHtml(hanvietRaw.toUpperCase())}` : '';
+                    return `${surface}${reading}${hanviet}${meaning}`;
+                }
 
-                const meaning = item.meaning_vi
-                    ? ` - ${answerTableEscapeHtml(item.meaning_vi)}`
-                    : '';
+                if (isPureKana) {
+                    return `${surface}${meaning}`;
+                }
 
-                const usage = usageRaw
-                    ? ` （${answerTableEscapeHtml(usageRaw)}）`
-                    : '';
-
-                return `${surface}${reading}${hanviet}${meaning}${usage}`;
+                // Từ Latin/số/khác: giữ dữ liệu nhưng không tự sinh KANA/KATAKANA.
+                const hanviet = hanvietRaw ? ` ${answerTableEscapeHtml(hanvietRaw.toUpperCase())}` : '';
+                return `${surface}${hanviet}${meaning}`;
             }).filter(Boolean).join('<br>');
         }
 
@@ -2646,7 +2680,8 @@
             const block = document.createElement('div');
             block.className = 'ai-generated-block';
             block.setAttribute('data-ai-block', blockType);
-            block.innerHTML = `<b>${title}</b><br>${bodyHtml || ''}`;
+            const safeTitle = String(title || '').trim();
+            block.innerHTML = safeTitle ? `<b>${safeTitle}</b><br>${bodyHtml || ''}` : `${bodyHtml || ''}`;
 
             holder.appendChild(block);
             return holder.innerHTML.trim();
@@ -2681,7 +2716,7 @@
                         q.explanation = upsertAIBlock(
                             q.explanation || '',
                             'ai-vocab',
-                            'AI từ vựng câu hỏi + A/B/C/D',
+                            '',
                             html
                         );
                     } else {
@@ -2791,7 +2826,7 @@
                             q.explanation = upsertAIBlock(
                                 q.explanation || '',
                                 'ai-vocab',
-                                'AI từ vựng câu hỏi + A/B/C/D',
+                                '',
                                 html
                             );
                         } else {
@@ -2865,7 +2900,7 @@
                         q.explanation = upsertAIBlock(
                             q.explanation || '',
                             'ai-vocab',
-                            'AI từ vựng câu hỏi + A/B/C/D',
+                            '',
                             html
                         );
                     } else {
@@ -2960,7 +2995,7 @@
                             q.explanation = upsertAIBlock(
                                 q.explanation || '',
                                 'ai-vocab',
-                                'AI từ vựng câu hỏi + A/B/C/D',
+                                '',
                                 html
                             );
                         } else {
@@ -3541,7 +3576,7 @@
             
             if (type === 'question') {
                 const currentCount = examSections[activeSectionIndex].groups[gIdx].questions.length;
-                titleEl.innerHTML = '✨ Thêm Câu Hỏi Mới';
+                titleEl.innerHTML = '✨ Thêm Câu Hỏi mới (theo số lượng)';
                 
                 // NẾU CÓ ĐÚNG 1 CÂU: Hỏi TỔNG SỐ
                 if (currentCount === 1) {
@@ -5233,8 +5268,7 @@
             const obj = currentRTEObject.element;
             if (!document.getElementById(`dokkai-passage-${gIdx}`)?.contains(obj)) return false;
 
-            obj.style.maxWidth = obj.cla
-ssList.contains('rte-table-frame') ? 'none' : '100%';
+            obj.style.maxWidth = obj.classList.contains('rte-table-frame') ? 'none' : '100%';
             const tag = obj.tagName.toLowerCase();
             const isImageFrame = obj.classList.contains('rte-image-frame');
             const isTableFrame = obj.classList.contains('rte-table-frame');
@@ -5290,7 +5324,8 @@ ssList.contains('rte-table-frame') ? 'none' : '100%';
 
         function getSelectedObjectForEdit(gIdx) {
             if (!currentRTEObject || currentRTEObject.gIdx !== gIdx || !currentRTEObject.element) {
-                showRTEToast('Bấm chọn bảng hoặc ô trong bảng trước nhé.');
+       
+         showRTEToast('Bấm chọn bảng hoặc ô trong bảng trước nhé.');
                 return null;
             }
             const editor = document.getElementById(`dokkai-passage-${gIdx}`);
@@ -8054,6 +8089,18 @@ ssList.contains('rte-table-frame') ? 'none' : '100%';
             return holder.innerHTML;
         }
 
+        function normalizeTeacherVocabLineBreaks(html) {
+            let result = String(html || '');
+            // Trong file giáo viên, các mục từ vựng Hiragana/Katakana/Kanji ngăn bằng ; ； | sẽ xuống dòng rõ ràng.
+            result = result.replace(/\s*(?:;|；|\|)\s*/g, '<br>');
+            result = result
+                .replace(/(?:<br\s*\/?>\s*){2,}/gi, '<br>')
+                .replace(/^(<br\s*\/?>|\s)+/gi, '')
+                .replace(/(<br\s*\/?>|\s)+$/gi, '')
+                .trim();
+            return result;
+        }
+
         function sanitizeTeacherLineHtml(html) {
             const holder = document.createElement('div');
             holder.innerHTML = unwrapAIBlockHtmlForExport(html || '', { removeAITitle: true });
@@ -8223,7 +8270,7 @@ ssList.contains('rte-table-frame') ? 'none' : '100%';
                         html += renderOptionsForExport(sec, q, isAnswerKey);
 
                         // --- CHUẨN HOÁ FORM LỜI GIẢI GV: KHÔNG LỘ <div>, KHÔNG LỘ DATA-AI, CHỈ GIỮ NỘI DUNG SẠCH ---
-                        let cleanExp = sanitizeTeacherLineHtml(q.explanation || '');
+                        let cleanExp = normalizeTeacherVocabLineBreaks(sanitizeTeacherLineHtml(q.explanation || ''));
                         let cleanNote = sanitizeTeacherLineHtml(q.note || '');
 
                         let hasExplanation = cleanExp.trim() !== "";
@@ -8254,6 +8301,16 @@ ssList.contains('rte-table-frame') ? 'none' : '100%';
             html += "</body></html>"; return html;
         }
 
+        function isStudentWordExportEnabled() {
+            const el = document.getElementById('export-student-word-toggle');
+            return !el || el.checked;
+        }
+
+        function isStudentExcelExportEnabled() {
+            const el = document.getElementById('export-student-excel-toggle');
+            return !el || el.checked;
+        }
+
         function executeExport(type) {
             forceAutoSave(); closeModals();
             let printWindow = null;
@@ -8275,14 +8332,27 @@ ssList.contains('rte-table-frame') ? 'none' : '100%';
                     }
                 } 
                 else if (type === 'student') {
-                    // File học sinh chỉ là đề Word; bảng đáp án + lời giải xuất riêng thành Excel cùng lúc.
-                    window.__wordPassageImageMap = null;
-                    const blob = htmlDocx.asBlob(generateHtmlForPrintOrExport(false, true, true, false));
-                    const link = document.createElement('a'); 
-                    link.href = URL.createObjectURL(blob); 
-                    link.download = filename + "_De_Hoc_Sinh.docx";
-                    document.body.appendChild(link); link.click(); document.body.removeChild(link);
-                    setTimeout(() => downloadAnswerExplanationExcel(filename), 250);
+                    // Có thể bật/tắt Word học sinh và Excel đáp án; mặc định xuất cùng lúc cả 2.
+                    const exportWord = isStudentWordExportEnabled();
+                    const exportExcel = isStudentExcelExportEnabled();
+
+                    if (!exportWord && !exportExcel) {
+                        alert('Cậu đang tắt cả Word và Excel. Hãy bật ít nhất một loại file để xuất nhé!');
+                        return;
+                    }
+
+                    if (exportWord) {
+                        window.__wordPassageImageMap = null;
+                        const blob = htmlDocx.asBlob(generateHtmlForPrintOrExport(false, true, true, false));
+                        const link = document.createElement('a'); 
+                        link.href = URL.createObjectURL(blob); 
+                        link.download = filename + "_De_Hoc_Sinh.docx";
+                        document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                    }
+
+                    if (exportExcel) {
+                        setTimeout(() => downloadAnswerExplanationExcel(filename), exportWord ? 250 : 0);
+                    }
                 }
                 else if (type === 'teacher') {
                     // File giáo viên dùng cho Azota: thêm Phần I/II/III... trước từng tiêu đề 問題,
@@ -8340,9 +8410,9 @@ ssList.contains('rte-table-frame') ? 'none' : '100%';
             // Cập nhật trạng thái hiển thị tiêu đề biệt lập cho riêng mục này
             updateToolbarVisibility();
 
-            let btnsHTML = `<button class="action-btn btn-add-q" onclick="addQuestionToGroup(${sec.groups.length - 1})" title="Nhập số lượng câu hỏi cần tạo">+ Thêm Câu Hỏi (Hàng loạt)</button>`;
+            let btnsHTML = `<button class="action-btn btn-add-q" onclick="addQuestionToGroup(${sec.groups.length - 1})" title="Nhập số lượng câu hỏi cần tạo">+ Thêm Câu Hỏi mới (theo số lượng)</button>`;
             if (sec.features.isGrouped) btnsHTML += `<button class="action-btn btn-add-g" onclick="addGroupToCurrentSection()" title="Nhập số lượng bài đọc cần tạo">📑 + Thêm Bài Đọc (hàng loạt)</button>`;
-            btnsHTML += `<button class="action-btn" style="background: linear-gradient(135deg, #8b5cf6, #ec4899); color: white;" onclick="openAIImportModal()">🔮 Nạp Câu Hỏi Từ Gemini AI</button>`;
+            btnsHTML += `<button class="action-btn" style="background: linear-gradient(135deg, #8b5cf6, #ec4899); color: white;" onclick="openAIImportModal()">🔮 Nạp Câu Hỏi Từ ChatGPT AI</button>`;
             btnsHTML += getGeminiSettingsPanelHtml();
             btnsHTML += `
                 <button class="action-btn btn-bulk" onclick="openBulkModal()">📝 Nhập Lời Giải Nhanh (hàng loạt)</button>
@@ -8570,7 +8640,7 @@ ssList.contains('rte-table-frame') ? 'none' : '100%';
         function executeAIParser() {
             const textRaw = document.getElementById('ai-import-textarea').value;
             if (!textRaw.trim()) {
-                alert("Khung text đang trống, cậu chưa dán câu hỏi từ AI vào kìa!");
+                alert("Khung text đang trống, cậu chưa dán câu hỏi từ ChatGPT AI vào kìa!");
                 return;
             }
 
