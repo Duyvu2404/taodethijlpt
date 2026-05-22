@@ -9001,12 +9001,12 @@
                                 ${autoCheckHtml}
                             </div>
                             
-                            ${qListHtml}
-
                             <div style="display: flex; gap: 4px; width: 100%; margin-top: 8px;">
                                 <button class="qa-btn-verify" onclick="toggleVerifyQA(event, ${sIdx}, ${gIdx}, [${qIndices}], ${chunkIndex})" style="flex: 1; padding: 6px;">✅ Duyệt Tất Cả</button>
                                 <button class="qa-btn-ai" onclick="runAutoQAGemini(event, ${sIdx}, ${gIdx}, ${chunkIndex}, [${qIndices}])" style="flex: 1; padding: 6px; background: #8b5cf6;">✨ AI Quét Chi Tiết</button>
                             </div>
+
+                            ${qListHtml}
                         </div>
                     `;
                 }
