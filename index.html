@@ -3603,6 +3603,46 @@
                 .replace(/&lt;(\/)?(ruby|rt|rp|rb)([\s\S]*?)&gt;/gi, '<$1$2$3>');
         }
 
+
+        function normalizeRubyForWordExportHtml(html) {
+            const holder = document.createElement('div');
+            holder.innerHTML = String(html || '');
+            holder.querySelectorAll('ruby').forEach(ruby => {
+                let rt = ruby.querySelector('rt');
+                const reading = (ruby.getAttribute('data-reading') || (rt ? rt.textContent : '') || '').trim();
+                const base = (ruby.getAttribute('data-base') || Array.from(ruby.childNodes).filter(n => {
+                    return !(n.nodeType === Node.ELEMENT_NODE && ['RT', 'RP'].includes(n.nodeName));
+                }).map(n => n.textContent || '').join('') || (ruby.textContent || '').replace(reading, '')).trim();
+
+                if (!base) return;
+
+                ruby.className = 'furigana-ruby word-ruby-121';
+                ruby.setAttribute('style', "ruby-align:distribute-space; mso-ruby-position:above; mso-ruby-align:distribute-space;");
+                ruby.setAttribute('data-base', base);
+                ruby.setAttribute('data-reading', reading);
+
+                while (ruby.firstChild) ruby.removeChild(ruby.firstChild);
+
+                const rb = document.createElement('rb');
+                rb.textContent = base;
+                ruby.appendChild(rb);
+
+                const rpOpen = document.createElement('rp');
+                rpOpen.textContent = '(';
+                ruby.appendChild(rpOpen);
+
+                rt = document.createElement('rt');
+                rt.textContent = reading;
+                rt.setAttribute('style', "font-family:'Yu Mincho','MS Mincho',serif; font-size:7pt; color:#000000; font-weight:400; mso-text-raise:0pt; line-height:1; mso-font-kerning:0pt;");
+                ruby.appendChild(rt);
+
+                const rpClose = document.createElement('rp');
+                rpClose.textContent = ')';
+                ruby.appendChild(rpClose);
+            });
+            return holder.innerHTML;
+        }
+
         function syncExamTitleBar() {
             const input = document.getElementById('filename-field');
             const display = document.getElementById('exam-title-display');
@@ -7289,7 +7329,7 @@
             holder.innerHTML = cleanHtmlGarbage(removeRTETextboxesFromHtml(rawHtml || ''), { mode: 'inline' });
             removeExportEditorArtifacts(holder);
             removeWordAndChatGPTGarbage(holder, { mode: 'inline' });
-            return holder.innerHTML;
+            return normalizeRubyForWordExportHtml(holder.innerHTML);
         }
 
         function prepareRTEHtmlForExport(rawHtml, group, forWordDoc = true) {
@@ -8429,7 +8469,7 @@
             html += ".answer-line { margin-top:0pt !important; margin-bottom:0pt !important; line-height:1.3; } ";
             html += ".explanation-line { margin-top:0pt !important; margin-bottom:1.3pt !important; line-height:1.3; font-style:italic; color:#b91c1c; } ";
             html += ".note-line { margin-top:0pt !important; margin-bottom:4pt !important; line-height:1.3; font-style:italic; color:#075985; } ";
-            html += "ruby.furigana-ruby, ruby { ruby-align:center; } ruby.furigana-ruby rt, ruby rt { font-size:6pt; color:#000000; font-weight:400; } ";
+            html += "ruby.furigana-ruby, ruby { ruby-align:distribute-space; mso-ruby-position:above; mso-ruby-align:distribute-space; } ruby.furigana-ruby rt, ruby rt { font-family:'Yu Mincho','MS Mincho',serif; font-size:7pt; color:#000000; font-weight:400; mso-text-raise:0pt; line-height:1; mso-font-kerning:0pt; } ";
             html += ".passage-question-blank, .section-title-question-blank { display:inline-block; min-width:52px; padding:1px 8px; margin:0 2px; border:1px solid #2563eb; border-radius:6px; background:#eff6ff; color:#1d4ed8; font-weight:700; text-align:center; white-space:nowrap; vertical-align:baseline; } ";
             html += ".rte-textbox { box-sizing:border-box; max-width:100%; } .rte-textbox-body { box-sizing:border-box; } .rte-textbox-handle, .rte-resize-handle { display:none !important; } ";
             html += ".rte-image-frame { max-width:100%; } .rte-image-frame img { max-width:100%; height:auto; } ";
