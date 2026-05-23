@@ -3171,7 +3171,8 @@
                     (group.questions || []).forEach(q => {
                         scanHtml(q.text || '');
                         (q.options || []).forEach(scanHtml);
-                        scanHtml(q.explanation || '');
+                        // Không lấy furigana từ ô Lời giải để tránh tự nhân đôi khi AI phân tích từ vựng.
+                        // Ô Lời giải chỉ giữ phiên âm do AI trả về hoặc do người dùng nhập thủ công.
                     });
                 });
             });
@@ -3184,22 +3185,69 @@
             holder.querySelectorAll('ruby.furigana-ruby, ruby').forEach(ruby => {
                 const base = getRubyBaseText(ruby);
                 const reading = getRubyReadingText(ruby);
-                ruby.replaceWith(document.createTextNode(reading ? `${base}(${reading})` : base));
+                ruby.replaceWith(document.createTextNode(reading ? `${base} (${reading})` : base));
             });
             return holder.innerHTML;
+        }
+
+        function collapseDuplicateInlineReadingsHtml(html) {
+            const holder = document.createElement('div');
+            holder.innerHTML = html || '';
+
+            const walker = document.createTreeWalker(holder, NodeFilter.SHOW_TEXT, {
+                acceptNode(node) {
+                    const parent = node.parentElement;
+                    if (!parent || !node.nodeValue) return NodeFilter.FILTER_REJECT;
+                    if (parent.closest('script, style, textarea, select, option')) return NodeFilter.FILTER_REJECT;
+                    return /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF々〆ヶ]+\s*[\(（][ぁ-んァ-ンー・･\s]+[\)）]/.test(node.nodeValue)
+                        ? NodeFilter.FILTER_ACCEPT
+                        : NodeFilter.FILTER_REJECT;
+                }
+            });
+
+            const nodes = [];
+            while (walker.nextNode()) nodes.push(walker.currentNode);
+
+            nodes.forEach(node => {
+                let value = node.nodeValue || '';
+                // Dọn lỗi kiểu: 短すぎ (みじかすぎ) (みじかすぎ) / 短すぎ（みじかすぎ）（みじかすぎ）
+                value = value
+                    // Chuẩn hóa luôn có space: Kanji (hiragana)
+                    .replace(
+                        /([\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF々〆ヶ]+)\s*[\(（]([ぁ-んァ-ンー・･\s]+)[\)）]/g,
+                        '$1 ($2)'
+                    )
+                    // Dọn lỗi lặp: Kanji (hiragana) (hiragana)
+                    .replace(
+                        /([\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF々〆ヶ]+)\s*[\(（]([ぁ-んァ-ンー・･\s]+)[\)）](?:\s*[\(（]\2[\)）])+/g,
+                        '$1 ($2)'
+                    );
+                node.nodeValue = value;
+            });
+
+            return holder.innerHTML;
+        }
+
+        function normalizeExplanationManualReadingHtml(html) {
+            // Ô Lời giải dùng chuẩn INLINE: Kanji (hiragana).
+            // - Nếu người dùng tự nhập Kanji và Kanji đó đã được nhập ruby/furigana ở câu hỏi/đáp án,
+            //   tự mượn reading đó để đổi thành Kanji (hiragana).
+            // - Nếu AI đã trả sẵn Kanji (hiragana) trong khối AI, bỏ qua khối AI để không bị double.
+            // - Nếu trong chính ô lời giải có ruby, chuyển ruby đó thành Kanji (hiragana).
+            return applyInlineFuriganaHintsToExplanationHtml(cleanEditableHtml(html || ''));
         }
 
         function applyInlineFuriganaHintsToExplanationHtml(html) {
             const map = collectFuriganaReadingMap();
             let normalizedHtml = convertRubyToInlineReadingHtml(html || '');
-            if (!map.size) return normalizedHtml;
+            if (!map.size) return collapseDuplicateInlineReadingsHtml(normalizedHtml);
 
             const holder = document.createElement('div');
             holder.innerHTML = normalizedHtml;
             const entries = Array.from(map.entries())
                 .filter(([base, reading]) => base && reading)
                 .sort((a, b) => b[0].length - a[0].length);
-            if (!entries.length) return holder.innerHTML;
+            if (!entries.length) return collapseDuplicateInlineReadingsHtml(holder.innerHTML);
 
             const pattern = new RegExp(entries.map(([base]) => escapeRegExpForFurigana(base)).join('|'), 'g');
             const readingByBase = new Map(entries);
@@ -3207,7 +3255,7 @@
                 acceptNode(node) {
                     const parent = node.parentElement;
                     if (!parent || !node.nodeValue) return NodeFilter.FILTER_REJECT;
-                    if (parent.closest('ruby, rt, rb, rp, script, style, textarea, select, option, .passage-question-blank, .section-title-question-blank')) return NodeFilter.FILTER_REJECT;
+                    if (parent.closest('ruby, rt, rb, rp, script, style, textarea, select, option, .ai-generated-block, .passage-question-blank, .section-title-question-blank')) return NodeFilter.FILTER_REJECT;
                     pattern.lastIndex = 0;
                     return pattern.test(node.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
                 }
@@ -3224,24 +3272,29 @@
                 while ((match = pattern.exec(text)) !== null) {
                     const base = match[0];
                     const reading = readingByBase.get(base) || '';
-                    const after = text.slice(match.index + base.length, match.index + base.length + reading.length + 2);
-                    const afterFull = text.slice(match.index + base.length, match.index + base.length + reading.length + 2);
+                    const afterText = text.slice(match.index + base.length);
                     if (match.index > last) frag.appendChild(document.createTextNode(text.slice(last, match.index)));
-                    if (reading && (after === `(${reading})` || afterFull === `（${reading}）` || text[match.index + base.length] === '(' || text[match.index + base.length] === '（')) {
+                    if (reading && new RegExp('^\\s*[\\(（]' + escapeRegExpForFurigana(reading) + '[\\)）]').test(afterText)) {
                         frag.appendChild(document.createTextNode(base));
                     } else {
-                        frag.appendChild(document.createTextNode(reading ? `${base}(${reading})` : base));
+                        frag.appendChild(document.createTextNode(reading ? `${base} (${reading})` : base));
                     }
                     last = match.index + base.length;
                 }
                 if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
                 node.replaceWith(frag);
             });
-            return holder.innerHTML;
+            return collapseDuplicateInlineReadingsHtml(holder.innerHTML);
+        }
+
+        function normalizeExplanationSafeInlineHtml(html) {
+            // Chỉ dọn rác và chuẩn hóa cái đã có sẵn: ruby -> Kanji (hiragana), bỏ lặp hiragana.
+            // KHÔNG tự phun thêm từ map ở bước hiển thị/lưu để tránh vừa xóa xong lại bị tự mọc lại.
+            return collapseDuplicateInlineReadingsHtml(convertRubyToInlineReadingHtml(cleanEditableHtml(html || '')));
         }
 
         function getExplanationDisplayHtml(html) {
-            return applyInlineFuriganaHintsToExplanationHtml(html || '');
+            return normalizeExplanationSafeInlineHtml(html || '');
         }
 
         function placeCaretAtEndEditable(el) {
@@ -3255,7 +3308,7 @@
         }
 
         function normalizeExplanationStorageHtml(html) {
-            return applyInlineFuriganaHintsToExplanationHtml(cleanEditableHtml(html || ''));
+            return normalizeExplanationSafeInlineHtml(html || '');
         }
 
         function normalizeNoteStorageHtml(html) {
@@ -3302,14 +3355,23 @@
             return { explanation: q.explanation || '', note: q.note || '' };
         }
 
-        function handleExplanationInput(input) {
+        function handleExplanationInput(input, event) {
             const before = input.innerHTML;
-            const converted = applyInlineFuriganaHintsToExplanationHtml(before);
+            const inputType = event && event.inputType ? String(event.inputType) : '';
+            const isDeleteAction = inputType.startsWith('delete');
+
+            // Khi gõ/dán Kanji thủ công: tự đổi thành Kanji (hiragana) nếu đã có ruby ở câu hỏi/đáp án.
+            // Khi xóa: CHỈ dọn cái đã có sẵn, tuyệt đối không tự phun lại hiragana vừa bị xóa.
+            const converted = isDeleteAction
+                ? normalizeExplanationSafeInlineHtml(before)
+                : normalizeExplanationManualReadingHtml(before);
+
+            input.dataset.inlineFuriganaMode = isDeleteAction ? 'delete' : 'normal';
             if (converted !== before) {
-                input.innerHTML = converted;
-                placeCaretAtEndEditable(input);
+                setEditableHtmlPreserveCaret(input, converted);
             }
             syncInputData(input);
+            delete input.dataset.inlineFuriganaMode;
             autoSave();
         }
 
@@ -3318,12 +3380,19 @@
             autoSave();
         }
 
-        function handleBulkExplanationInput(input) {
+        function handleBulkExplanationInput(input, event) {
             const before = input.innerHTML;
-            const converted = applyInlineFuriganaHintsToExplanationHtml(before);
+            const inputType = event && event.inputType ? String(event.inputType) : '';
+            const isDeleteAction = inputType.startsWith('delete');
+
+            // Modal lời giải hàng loạt: gõ/dán thì tự thêm Kanji (hiragana), xóa thì không tự mọc lại.
+            const converted = isDeleteAction
+                ? normalizeExplanationSafeInlineHtml(before)
+                : normalizeExplanationManualReadingHtml(before);
+
+            input.dataset.inlineFuriganaMode = isDeleteAction ? 'delete' : 'normal';
             if (converted !== before) {
-                input.innerHTML = converted;
-                placeCaretAtEndEditable(input);
+                setEditableHtmlPreserveCaret(input, converted);
             }
         }
 
@@ -3363,7 +3432,7 @@
                     const parent = node.parentElement;
                     if (!parent || !node.nodeValue || !FURIGANA_KANJI_RE.test(node.nodeValue)) return NodeFilter.FILTER_REJECT;
                     FURIGANA_KANJI_RE.lastIndex = 0;
-                    if (parent.closest('ruby, rt, rb, rp, script, style, textarea, select, option, .passage-question-blank, .section-title-question-blank, .rte-table-drag-handle, .rte-resize-handle')) return NodeFilter.FILTER_REJECT;
+                    if (parent.closest('ruby, rt, rb, rp, script, style, textarea, select, option, .ai-generated-block, [data-ai-block], .passage-question-blank, .section-title-question-blank, .rte-table-drag-handle, .rte-resize-handle')) return NodeFilter.FILTER_REJECT;
                     return NodeFilter.FILTER_ACCEPT;
                 }
             });
@@ -3407,8 +3476,9 @@
                         q.text = wrapKanjiHtmlWithFurigana(q.text || '');
                         q.options = (q.options || ['', '', '', '']).map(opt => wrapKanjiHtmlWithFurigana(opt || ''));
                         ensureQuestionExplanationFields(q);
-                        // Lời giải không dùng ruby trên đầu: tự chuyển thành 漢字(hiragana) để dễ đọc và dễ đưa lên Azota.
-                        q.explanation = applyInlineFuriganaHintsToExplanationHtml(q.explanation || '');
+                        // Lời giải xuất/hiển thị theo dạng Kanji (hiragana), không dùng ruby trên đầu.
+                        // Mượn reading từ câu hỏi/đáp án nếu người dùng nhập thủ công, nhưng bỏ qua khối AI.
+                        q.explanation = normalizeExplanationManualReadingHtml(q.explanation || '');
                     });
                 });
             });
@@ -4347,7 +4417,7 @@
                             <div class="question-header">
                                 <div class="q-main input-group">
                                 <span class="prefix-label" onclick="toggleSingleExplanation(this)" title="Nhấn để ẩn/hiện lời giải câu này">Câu ${q.id}.</span>
-                                    <div contenteditable="true" class="question-title editor-input" id="qtitle-g${gIdx}-q${qIdx}" data-g-idx="${gIdx}" data-q-idx="${qIdx}" placeholder="Nhập câu hỏi (Space tạo ô câu hỏi)..." onkeydown="handleQuestionTitleKeydown(event, this, ${gIdx}, ${qIdx})" onclick="handleQuestionTitleClick(event, ${gIdx}, ${qIdx})" ondblclick="handleQuestionTitleBlankDblClick(event, ${gIdx}, ${qIdx})" oninput="handleQuestionTitleInput(this, ${gIdx}, ${qIdx})">${getFuriganaDisplayHtml(refreshPassageBlankLabels(q.text || '', group))}</div>
+                                    <div contenteditable="true" class="question-title editor-input" id="qtitle-g${gIdx}-q${qIdx}" data-g-idx="${gIdx}" data-q-idx="${qIdx}" placeholder="Nhập câu hỏi (Space tạo ô câu hỏi)..." onkeydown="handleQuestionTitleKeydown(event, this, ${gIdx}, ${qIdx})" onclick="handleQuestionTitleClick(event, ${gIdx}, ${qIdx})" ondblclick="handleQuestionTitleBlankDblClick(event, ${gIdx}, ${qIdx})" onpaste="handleQuestionTitlePaste(event, this, ${gIdx}, ${qIdx})" oninput="handleQuestionTitleInput(this, ${gIdx}, ${qIdx})">${getFuriganaDisplayHtml(refreshPassageBlankLabels(q.text || '', group))}</div>
                                 </div>
                                 ${starInputHtml}
                                 ${underlineInputHtml}
@@ -4360,7 +4430,7 @@
                                             <button type="button" class="ai-mini-btn" onclick="runQuestionAI(${actualSectionIndex}, ${gIdx}, ${qIdx}, 'vocab')">AI từ vựng</button>
                                         </span>
                                     </div>
-                                    <div contenteditable="true" class="question-explain editor-input" tabindex="-1" data-g-idx="${gIdx}" data-q-idx="${qIdx}" placeholder="VD: 海岸(かいがん) HẢI NGẠN - bờ biển" oninput="handleExplanationInput(this)" onkeydown="handleExplainKeydown(event, this)">${getExplanationDisplayHtml(explainFields.explanation || '')}</div>
+                                    <div contenteditable="true" class="question-explain editor-input" tabindex="-1" data-g-idx="${gIdx}" data-q-idx="${qIdx}" placeholder="VD: 海岸(かいがん) HẢI NGẠN - bờ biển" oninput="handleExplanationInput(this, event)" onkeydown="handleExplainKeydown(event, this)">${getExplanationDisplayHtml(explainFields.explanation || '')}</div>
                                 </div>
                                 <div class="explain-field-wrap note-wrap">
                                     <div class="explain-field-label">
@@ -4589,7 +4659,6 @@
 
             syncInputData(input);
             reapplyStarPosition(gIdx, qIdx);
-            reapplyUnderlineFormat(gIdx, qIdx);
             autoSave();
         }
 
@@ -4614,8 +4683,81 @@
             if (input) syncInputData(input);
         }
 
+        function sanitizeQuestionPasteHtml(rawHtml, rawText) {
+            const allowedInlineTags = new Set(['B', 'STRONG', 'U', 'I', 'EM', 'BR', 'RUBY', 'RT', 'RP', 'RB']);
+            const holder = document.createElement('div');
+            holder.innerHTML = rawHtml || furiganaEscapeHtml(rawText || '').replace(/\n/g, '<br>');
+
+            const cleanNode = (node) => {
+                if (node.nodeType === Node.TEXT_NODE) {
+                    return document.createTextNode((node.nodeValue || '').replace(/\u200b/g, ''));
+                }
+                if (node.nodeType !== Node.ELEMENT_NODE) return document.createTextNode('');
+
+                const tag = node.tagName;
+                const children = Array.from(node.childNodes).map(cleanNode).filter(Boolean);
+
+                // Div/p/li/paste block: giữ nội dung, đổi ranh giới dòng thành <br> để không phá caret.
+                if (['DIV', 'P', 'LI', 'SECTION', 'ARTICLE'].includes(tag)) {
+                    const frag = document.createDocumentFragment();
+                    children.forEach(child => frag.appendChild(child));
+                    frag.appendChild(document.createElement('br'));
+                    return frag;
+                }
+
+                if (!allowedInlineTags.has(tag)) {
+                    const frag = document.createDocumentFragment();
+                    children.forEach(child => frag.appendChild(child));
+                    return frag;
+                }
+
+                const el = document.createElement(tag.toLowerCase());
+                if (tag === 'RUBY') {
+                    el.className = 'furigana-ruby';
+                    const tmp = document.createElement('div');
+                    children.forEach(child => tmp.appendChild(child));
+                    el.innerHTML = tmp.innerHTML;
+                    el.setAttribute('data-base', getRubyBaseText(el));
+                    el.setAttribute('data-reading', getRubyReadingText(el));
+                    el.setAttribute('contenteditable', 'false');
+                    normalizeExistingFuriganaRuby({ querySelectorAll: (sel) => el.matches(sel) ? [el] : Array.from(el.querySelectorAll(sel)) });
+                    return el;
+                }
+                children.forEach(child => el.appendChild(child));
+                return el;
+            };
+
+            const out = document.createDocumentFragment();
+            Array.from(holder.childNodes).forEach(node => out.appendChild(cleanNode(node)));
+            const temp = document.createElement('div');
+            temp.appendChild(out);
+            let html = cleanEditableHtml(temp.innerHTML)
+                .replace(/(?:<br\s*\/?>\s*)+$/gi, '')
+                .trim();
+            return html || furiganaEscapeHtml(rawText || '');
+        }
+
+        function handleQuestionTitlePaste(event, input, gIdx, qIdx) {
+            const cd = event.clipboardData || window.clipboardData;
+            if (!cd) return;
+            event.preventDefault();
+
+            const html = sanitizeQuestionPasteHtml(cd.getData('text/html'), cd.getData('text/plain'));
+            insertHtmlAtCurrentCaret(html);
+            // Chỉ đồng bộ dữ liệu; không render lại câu hỏi nên con trỏ không nhảy về đầu
+            // và định dạng <b><u> do ChatGPT đưa qua vẫn được giữ.
+            handleQuestionTitleInput(input, gIdx, qIdx);
+        }
+
         function handleQuestionTitleInput(input, gIdx, qIdx) {
-            syncInputData(input); reapplyStarPosition(gIdx, qIdx); reapplyUnderlineFormat(gIdx, qIdx); autoSave();
+            syncInputData(input);
+            const q = examSections?.[activeSectionIndex]?.groups?.[gIdx]?.questions?.[qIdx];
+            // Không tự quét lại in đậm/gạch chân mỗi lần gõ, vì sẽ làm nhảy con trỏ
+            // và làm mất định dạng <b><u> khi người dùng sửa thêm chữ Nhật ở giữa câu.
+            if (q && q.starPosition && (q.text || '').includes(QUESTION_BLANK_TOKEN)) {
+                reapplyStarPosition(gIdx, qIdx);
+            }
+            autoSave();
         }
 
         function handleUnderlineInputWrapper(input, gIdx, qIdx) {
@@ -4625,25 +4767,62 @@
         function reapplyUnderlineFormat(gIdx, qIdx) {
             if(activeSectionIndex === -1) return;
             const q = examSections[activeSectionIndex].groups[gIdx].questions[qIdx];
-            let text = q.text || '';
+            let html = q.text || '';
             let underlineWord = (q.underline || '').trim();
 
-            // Xóa thẻ b, u cũ do hàm này tạo ra hoặc ngoặc 【 】 cũ (nếu còn sót)
-            text = text.replace(/<b><u>(.*?)<\/u><\/b>/g, '$1'); 
-            text = text.replace(/【(.*?)】/g, '$1'); 
+            // Nếu ô tự gạch chân trống thì không động vào HTML câu hỏi.
+            // Như vậy định dạng in đậm/gạch chân do ChatGPT hoặc người dùng dán vào sẽ không bị xoá mất.
+            if (!underlineWord) return;
 
-            // Chèn trực tiếp thẻ HTML <b><u> vào từ cần nhấn mạnh
-            if (underlineWord !== "") {
-                const escapedUnderline = underlineWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                text = text.replace(new RegExp(escapedUnderline, 'g'), `<b><u>${underlineWord}</u></b>`);
-            }
-            
-            q.text = text;
+            const holder = document.createElement('div');
+            holder.innerHTML = cleanEditableHtml(html);
+
+            // Gỡ đúng lớp <b><u> đang bọc cùng một từ, không gỡ tất cả định dạng thủ công khác.
+            holder.querySelectorAll('b > u, strong > u, u > b, u > strong').forEach(el => {
+                if ((el.textContent || '').trim() === underlineWord) {
+                    const text = document.createTextNode(el.textContent || '');
+                    const parent = el.parentElement;
+                    if (parent && ['B', 'STRONG', 'U'].includes(parent.tagName)) parent.replaceWith(text);
+                    else el.replaceWith(text);
+                }
+            });
+
+            const escapedUnderline = underlineWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const re = new RegExp(escapedUnderline, 'g');
+            const walker = document.createTreeWalker(holder, NodeFilter.SHOW_TEXT, {
+                acceptNode(node) {
+                    const parent = node.parentElement;
+                    if (!parent || !node.nodeValue) return NodeFilter.FILTER_REJECT;
+                    if (parent.closest('b, strong, u, ruby, rt, rp, script, style, textarea, select, option, .passage-question-blank')) return NodeFilter.FILTER_REJECT;
+                    re.lastIndex = 0;
+                    return re.test(node.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+                }
+            });
+            const nodes = [];
+            while (walker.nextNode()) nodes.push(walker.currentNode);
+            nodes.forEach(node => {
+                const text = node.nodeValue || '';
+                const frag = document.createDocumentFragment();
+                let last = 0;
+                re.lastIndex = 0;
+                let match;
+                while ((match = re.exec(text)) !== null) {
+                    if (match.index > last) frag.appendChild(document.createTextNode(text.slice(last, match.index)));
+                    const b = document.createElement('b');
+                    const u = document.createElement('u');
+                    u.textContent = match[0];
+                    b.appendChild(u);
+                    frag.appendChild(b);
+                    last = match.index + match[0].length;
+                }
+                if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+                node.replaceWith(frag);
+            });
+
+            q.text = normalizeQuestionTokens(holder.innerHTML);
             const inputEl = document.getElementById(`qtitle-g${gIdx}-q${qIdx}`);
-            
-            // contenteditable phải cập nhật qua innerHTML
-            if(inputEl && inputEl.innerHTML !== text) { 
-                inputEl.innerHTML = text; 
+            if(inputEl && inputEl.innerHTML !== q.text) {
+                setEditableHtmlPreserveCaret(inputEl, q.text);
             }
         }
 
@@ -6294,7 +6473,7 @@
                 if (e.key === ' ' || e.key === '　') {
                     e.preventDefault(); 
                     document.execCommand('insertText', false, '   ＿＿＿   ');
-                    syncInputData(target); reapplyStarPosition(gIdx, qIdx); reapplyUnderlineFormat(gIdx, qIdx); autoSave(); return;
+                    syncInputData(target); reapplyStarPosition(gIdx, qIdx); autoSave(); return;
                 }
             }
 
@@ -6846,7 +7025,7 @@
                                     <div class="bulk-exp-two-cols">
                                         <div class="bulk-exp-pane vocab-pane">
                                             <div class="bulk-exp-sub-label">📘 Từ vựng / lời giải <span class="ai-mini-actions"><button type="button" class="ai-mini-btn" onclick="runBulkQuestionAI(${sIdx}, ${gIdx}, ${qIdx}, 'vocab')">AI từ vựng</button></span></div>
-                                            <div contenteditable="true" class="bulk-exp-input bulk-exp-vocab" data-s="${sIdx}" data-g="${gIdx}" data-q="${qIdx}" placeholder="VD: 海岸(かいがん) HẢI NGẠN - bờ biển" oninput="handleBulkExplanationInput(this)" onkeydown="handleBulkExpKeydown(event, this)">${getExplanationDisplayHtml(explainFields.explanation || '')}</div>
+                                            <div contenteditable="true" class="bulk-exp-input bulk-exp-vocab" data-s="${sIdx}" data-g="${gIdx}" data-q="${qIdx}" placeholder="VD: 海岸(かいがん) HẢI NGẠN - bờ biển" oninput="handleBulkExplanationInput(this, event)" onkeydown="handleBulkExpKeydown(event, this)">${getExplanationDisplayHtml(explainFields.explanation || '')}</div>
                                         </div>
                                         <div class="bulk-exp-pane note-pane">
                                             <div class="bulk-exp-sub-label">📝 Ghi chú <span class="ai-mini-actions"><button type="button" class="ai-mini-btn grammar" onclick="runBulkQuestionAI(${sIdx}, ${gIdx}, ${qIdx}, 'grammar')">AI ngữ pháp</button></span></div>
@@ -7107,14 +7286,15 @@
 
         function prepareInlineHtmlForExport(rawHtml) {
             const holder = document.createElement('div');
-            holder.innerHTML = removeRTETextboxesFromHtml(rawHtml || '');
+            holder.innerHTML = cleanHtmlGarbage(removeRTETextboxesFromHtml(rawHtml || ''), { mode: 'inline' });
             removeExportEditorArtifacts(holder);
+            removeWordAndChatGPTGarbage(holder, { mode: 'inline' });
             return holder.innerHTML;
         }
 
         function prepareRTEHtmlForExport(rawHtml, group, forWordDoc = true) {
             const holder = document.createElement('div');
-            holder.innerHTML = refreshPassageBlankLabels(removeRTETextboxesFromHtml(rawHtml || ''), group);
+            holder.innerHTML = refreshPassageBlankLabels(cleanHtmlGarbage(removeRTETextboxesFromHtml(rawHtml || ''), { mode: 'rich' }), group);
             removeExportEditorArtifacts(holder);
 
             holder.querySelectorAll('.rte-textbox').forEach(box => box.remove());
@@ -8233,7 +8413,8 @@
             let html = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns:v='urn:schemas-microsoft-com:vml' xmlns='http://www.w3.org/TR/REC-html40'>";
             html += "<head><meta charset='utf-8'><style>";
             html += "v\\:* { behavior:url(#default#VML); } ";
-            html += "body { font-family:'Times New Roman','MS Mincho',serif; font-size:12pt; padding:20px; } ";
+            html += "@page WordSection1 { size:21cm 29.7cm; margin:1.55cm 1.45cm 1.55cm 1.45cm; } div.WordSection1 { page:WordSection1; } ";
+            html += "body { font-family:'Times New Roman','MS Mincho',serif; font-size:12pt; padding:0; color:#111827; } ";
             html += "body, p, div, span, h2, h3, table p, table td, table th { mso-margin-top-alt:0pt; mso-margin-bottom-alt:0pt; } ";
             html += "p { margin-top:0pt; margin-bottom:0pt; line-height:1.3; } ";
             html += "h2.export-main-title { text-align:center; margin-top:0pt; margin-bottom:8pt; } ";
@@ -8307,7 +8488,7 @@
 
                     group.questions.forEach(q => {
                         let exportText = stripQuestionStarToken(isAnswerKey ? stripFuriganaHtml(q.text || '') : (q.text || ''));
-                        let safeText = exportText.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                        let safeText = prepareInlineHtmlForExport(exportText);
 
                         if (q.starPosition && q.starPosition >= 1 && q.starPosition <= 4) {
                             let parts = safeText.split(QUESTION_BLANK_TOKEN); let starPos = parseInt(q.starPosition);
@@ -8329,8 +8510,8 @@
 
                         safeText = safeText.replace(/   ＿★＿   /g, isAnswerKey ? "&nbsp;<span class='azota-star-slot'><u>___★___</u></span>&nbsp;" : "&nbsp;&nbsp;&nbsp;<u>　★　</u>&nbsp;&nbsp;&nbsp;");
                         safeText = safeText.replace(/   ＿＿＿   /g, isAnswerKey ? "&nbsp;<span class='azota-star-slot'>_______</span>&nbsp;" : "&nbsp;&nbsp;&nbsp;<u>　　　</u>&nbsp;&nbsp;&nbsp;");
-                        safeText = safeText.replace(/&lt;b&gt;/gi, "<b>").replace(/&lt;\/b&gt;/gi, "</b>");
-                        safeText = safeText.replace(/&lt;u&gt;/gi, "<u>").replace(/&lt;\/u&gt;/gi, "</u>");
+                        safeText = safeText.replace(/&lt;b(?:\s+[^&]*?)?&gt;/gi, "<b>").replace(/&lt;\/b&gt;/gi, "</b>");
+                        safeText = safeText.replace(/&lt;u(?:\s+[^&]*?)?&gt;/gi, "<u>").replace(/&lt;\/u&gt;/gi, "</u>");
                         safeText = restoreRubyTagsAfterEscaping(safeText);
                         safeText = safeText.replace(/&lt;br\s*\/?&gt;/gi, "<br>");
                         safeText = safeText.replace(/&lt;div[^&]*&gt;/gi, "<br>").replace(/&lt;\/div&gt;/gi, "");
@@ -8386,6 +8567,7 @@
         }
 
         function executeExport(type) {
+            deepCleanCurrentExamData();
             forceAutoSave(); closeModals();
             let printWindow = null;
             // Gọi window.open ngay lập tức trước khi chạy timeout để tránh bị trình duyệt chặn Popup
@@ -8582,8 +8764,8 @@
                 // Lấy chữ thuần túy
                 let text = (e.clipboardData || window.clipboardData).getData('text/plain');
                 
-                // Giữ lại dấu xuống dòng cố ý của cậu bằng cách biến nó thành thẻ <br> chuẩn
-                text = text.trim().replace(/\r?\n/g, '<br>');
+                // Dọn sâu ngay lúc dán: xoá <b style=...>, span/style rác, Word/ChatGPT HTML bị lộ; giữ xuống dòng cố ý bằng <br> chuẩn
+                text = cleanHtmlGarbage(text.trim().replace(/\r?\n/g, '<br>'), { mode: 'line' });
                 
                 // Dùng insertHTML để dán vào
                 document.execCommand('insertHTML', false, text);
@@ -8597,104 +8779,182 @@
         // CHỨC NĂNG DỌN RÁC DATA CŨ & LỖI HIỂN THỊ <br>
         // ==========================================
         function cleanUpOldData() {
-            if (!confirm("Hệ thống sẽ quét và tự động dọn sạch các lỗi hiển thị thẻ <br>, &lt;br&gt;, và khoảng trắng/dòng trống dư thừa ở cuối các câu hỏi, đáp án, lời giải trong toàn bộ đề này. Cậu chắc chắn chứ?")) return;
+            if (!confirm("Hệ thống sẽ quét sâu toàn bộ đề: xoá thẻ HTML bị lộ như <b style=...>, &lt;br&gt;, style nền trong suốt, span rác từ ChatGPT/Google Docs và dọn dòng trống dư. Cậu chắc chắn chứ?")) return;
 
-            showLoadingScreen('🧹 Đang dọn dẹp dữ liệu cũ...', 1000, () => {
-                examSections.forEach(sec => {
-                    // Dọn dẹp tiêu đề phần
-                    if (sec.title) sec.title = cleanHtmlGarbage(sec.title);
-
-                    (sec.groups || []).forEach(g => {
-                        (g.questions || []).forEach(q => {
-                            // Dọn dẹp câu hỏi, lời giải, ghi chú
-                            q.text = cleanHtmlGarbage(q.text);
-                            q.explanation = cleanHtmlGarbage(q.explanation);
-                            q.note = cleanHtmlGarbage(q.note);
-
-                            // Dọn dẹp các đáp án A, B, C, D
-                            if (q.options && Array.isArray(q.options)) {
-                                q.options = q.options.map(opt => cleanHtmlGarbage(opt));
-                            }
-                        });
-                    });
-                });
+            showLoadingScreen('🧹 Đang dọn sâu dữ liệu cũ...', 1000, () => {
+                const stats = deepCleanCurrentExamData();
 
                 // Ép lưu dữ liệu sạch vào LocalStorage và vẽ lại giao diện lập tức
                 forceAutoSave();
                 initApp();
-                showRTEToast("✨ Đã dọn dẹp xong! Dữ liệu của cậu giờ đã sạch sẽ.");
+                showRTEToast(`✨ Đã dọn sâu xong! Đã xử lý ${stats.changed} ô dữ liệu, xoá style/thẻ rác và lỗi xuống dòng.`);
             });
         }
 
-        function cleanHtmlGarbage(html) {
-            if (!html) return "";
+        function deepCleanCurrentExamData() {
+            const stats = { changed: 0 };
+            const cleanValue = (value, mode = 'inline') => {
+                const before = value || '';
+                let after = cleanHtmlGarbage(before, { mode });
+                if (after !== before) stats.changed++;
+                return after;
+            };
 
+            (examSections || []).forEach(sec => {
+                if (sec.title) sec.title = cleanValue(sec.title, 'inline');
+
+                (sec.groups || []).forEach(g => {
+                    if (g.passageHTML) g.passageHTML = cleanValue(g.passageHTML, 'rich');
+
+                    (g.questions || []).forEach(q => {
+                        q.text = cleanValue(q.text, 'inline');
+                        q.explanation = cleanValue(q.explanation, 'line');
+                        q.note = cleanValue(q.note, 'line');
+                        q.underline = plainTextDeepClean(q.underline || '');
+
+                        if (q.options && Array.isArray(q.options)) {
+                            q.options = q.options.map(opt => cleanValue(opt, 'inline'));
+                        }
+                    });
+                });
+            });
+            return stats;
+        }
+
+        function decodeHtmlEntitiesDeep(value, maxPasses = 4) {
+            let text = String(value || '');
+            const textarea = document.createElement('textarea');
+            for (let i = 0; i < maxPasses; i++) {
+                textarea.innerHTML = text;
+                const decoded = textarea.value;
+                if (decoded === text) break;
+                text = decoded;
+            }
+            return text;
+        }
+
+        function plainTextDeepClean(value) {
             const holder = document.createElement('div');
+            holder.innerHTML = cleanHtmlGarbage(value || '', { mode: 'line' });
+            return (holder.textContent || '')
+                .replace(/\u00a0/g, ' ')
+                .replace(/[ \t]{2,}/g, ' ')
+                .replace(/\s+$/g, '')
+                .trim();
+        }
 
-            let text = String(html)
-                .replace(/&lt;br\s*\/?&gt;/gi, '<br>')
-                .replace(/&lt;(\/?)(b|u|i|strong|em|ruby|rt|rp|rb|span|div|p)([^&]*)&gt;/gi, '<$1$2$3>');
+        function removeWordAndChatGPTGarbage(holder, options = {}) {
+            const mode = options.mode || 'inline';
 
-            holder.innerHTML = text;
+            holder.querySelectorAll('script, style, meta, link, iframe, object, embed').forEach(el => el.remove());
 
             holder.querySelectorAll('.ai-generated-block, [data-ai-block]').forEach(block => {
-                const firstB = block.querySelector('b');
-
+                const firstB = block.querySelector('b,strong');
                 if (firstB && /^AI\s+/i.test((firstB.textContent || '').trim())) {
                     let next = firstB.nextSibling;
                     firstB.remove();
-
-                    if (next && next.nodeType === Node.ELEMENT_NODE && next.tagName === 'BR') {
-                        next.remove();
-                    }
+                    if (next && next.nodeType === Node.ELEMENT_NODE && next.tagName === 'BR') next.remove();
                 }
-
                 const frag = document.createDocumentFragment();
-
-                while (block.firstChild) {
-                    frag.appendChild(block.firstChild);
-                }
-
+                while (block.firstChild) frag.appendChild(block.firstChild);
                 block.replaceWith(frag);
             });
 
             holder.querySelectorAll('*').forEach(el => {
                 const tag = el.tagName.toLowerCase();
-
-                Array.from(el.attributes || []).forEach(attr => {
-                    if (/^on/i.test(attr.name)) el.removeAttribute(attr.name);
-                });
-
                 const isProtectedBlank =
                     el.classList.contains('passage-question-blank') ||
                     el.classList.contains('section-title-question-blank');
-
                 const isRubyTag = ['ruby', 'rt', 'rp', 'rb'].includes(tag);
                 const isBasicFormat = ['b', 'u', 'i', 'strong', 'em', 'br'].includes(tag);
+
+                Array.from(el.attributes || []).forEach(attr => {
+                    const name = attr.name.toLowerCase();
+                    const value = String(attr.value || '');
+                    const keepProtectedClass = name === 'class' && isProtectedBlank;
+                    const keepProtectedData = isProtectedBlank && /^data-blank-/i.test(name);
+                    const keepRubyClass = name === 'class' && isRubyTag && /furigana-ruby/.test(value);
+
+                    if (/^on/i.test(name) || name === 'style' || name.startsWith('aria-') || name.startsWith('data-mce') || name.startsWith('mso-')) {
+                        el.removeAttribute(attr.name);
+                    } else if (['contenteditable', 'placeholder', 'spellcheck', 'role', 'dir', 'lang'].includes(name)) {
+                        el.removeAttribute(attr.name);
+                    } else if (!keepProtectedClass && !keepProtectedData && !keepRubyClass && ['class', 'id', 'title'].includes(name)) {
+                        el.removeAttribute(attr.name);
+                    }
+                });
+
+                if (tag === 'strong') {
+                    const b = document.createElement('b');
+                    b.innerHTML = el.innerHTML;
+                    el.replaceWith(b);
+                    return;
+                }
+                if (tag === 'em') {
+                    const i = document.createElement('i');
+                    i.innerHTML = el.innerHTML;
+                    el.replaceWith(i);
+                    return;
+                }
 
                 if (tag === 'span' && isProtectedBlank) return;
                 if (isRubyTag || isBasicFormat) return;
 
-                if (tag === 'span' || tag === 'font') {
+                if (tag === 'div' || tag === 'p') {
                     const frag = document.createDocumentFragment();
+                    while (el.firstChild) frag.appendChild(el.firstChild);
+                    if (mode !== 'inline') frag.appendChild(document.createElement('br'));
+                    el.replaceWith(frag);
+                    return;
+                }
 
-                    while (el.firstChild) {
-                        frag.appendChild(el.firstChild);
-                    }
-
+                if (['span', 'font', 'o:p', 'section', 'article'].includes(tag) || !['table','tbody','thead','tfoot','tr','td','th','img'].includes(tag)) {
+                    const frag = document.createDocumentFragment();
+                    while (el.firstChild) frag.appendChild(el.firstChild);
                     el.replaceWith(frag);
                 }
             });
+        }
+
+        function cleanHtmlGarbage(html, options = {}) {
+            if (!html) return "";
+            const mode = options.mode || 'inline';
+            const holder = document.createElement('div');
+
+            let text = decodeHtmlEntitiesDeep(String(html))
+                .replace(/\\(["'])/g, '$1')
+                .replace(/[\u200B-\u200D\uFEFF]/g, '')
+                .replace(/\u00a0/g, ' ')
+                .replace(/<\s*br\s*\/?\s*>/gi, '<br>')
+                .replace(/<\s*\/\s*(div|p)\s*>/gi, '<br>')
+                .replace(/<\s*(div|p)(?:\s+[^>]*)?>/gi, mode === 'inline' ? '' : '')
+                .replace(/<\s*b\s+[^>]*>/gi, '<b>')
+                .replace(/<\s*u\s+[^>]*>/gi, '<u>')
+                .replace(/<\s*i\s+[^>]*>/gi, '<i>')
+                .replace(/<\s*strong\s+[^>]*>/gi, '<strong>')
+                .replace(/<\s*em\s+[^>]*>/gi, '<em>')
+                .replace(/<\s*span\s+style=["'][^"']*["']\s*>/gi, '<span>');
+
+            holder.innerHTML = text;
+            removeWordAndChatGPTGarbage(holder, { mode });
 
             let result = holder.innerHTML;
-
             result = result
-                .replace(/&nbsp;/g, ' ')
+                .replace(/&nbsp;/gi, ' ')
                 .replace(/\s*<br\s*\/?>\s*/gi, '<br>')
-                .replace(/(<br\s*\/?>){3,}/gi, '<br><br>');
+                .replace(/(?:<br\s*\/?>){3,}/gi, '<br><br>')
+                .replace(/^[ \t]+|[ \t]+$/gm, '')
+                .replace(/[ \t]{2,}/g, ' ');
+
+            if (mode === 'inline') {
+                result = result.replace(/(?:<br\s*\/?>)+/gi, '<br>');
+            }
 
             while (/(<br\s*\/?>|\s)+$/i.test(result)) {
                 result = result.replace(/(<br\s*\/?>|\s)+$/i, '');
+            }
+            while (/^(<br\s*\/?>|\s)+/i.test(result)) {
+                result = result.replace(/^(<br\s*\/?>|\s)+/i, '');
             }
 
             return result.trim();
