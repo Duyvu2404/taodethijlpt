@@ -2248,7 +2248,9 @@
             if (!sec || !group || !q) return '';
 
             const opts = (q.options || ['', '', '', '']).map((opt, idx) => {
-                return `${['A', 'B', 'C', 'D'][idx]}. ${getPlainTextForAI(opt)}`;
+                const label = ['A', 'B', 'C', 'D'][idx];
+                return `OPTION_${label}_TEXT:
+${getPlainTextForAI(opt)}`;
             }).join('\n');
 
             const passageText = includePassage ? getPlainTextForAI(group.passageHTML || '') : '';
@@ -2270,7 +2272,9 @@
 
             const questions = (group.questions || []).map((q, idx) => {
                 const opts = (q.options || ['', '', '', '']).map((opt, oIdx) => {
-                    return `${['A', 'B', 'C', 'D'][oIdx]}. ${getPlainTextForAI(opt)}`;
+                    const label = ['A', 'B', 'C', 'D'][oIdx];
+                    return `OPTION_${label}_TEXT:
+${getPlainTextForAI(opt)}`;
                 }).join('\n');
 
                 return `QUESTION_INDEX=${idx + 1}\nCâu ${q.id || idx + 1}: ${getPlainTextForAI(q.text || '')}\n${opts}`;
@@ -2308,6 +2312,12 @@
           + ĐOẠN ĐỌC nếu dữ liệu có đoạn đọc.
           + CÂU HỎI.
           + ĐÁP ÁN A/B/C/D.
+        - QUY TẮC CỨNG CHO ĐÁP ÁN A/B/C/D:
+          + Phải quét lần lượt đủ 4 vùng OPTION_A_TEXT, OPTION_B_TEXT, OPTION_C_TEXT, OPTION_D_TEXT.
+          + Không chỉ phân tích đáp án đúng; mọi từ/cụm đáng học xuất hiện trong A, B, C hoặc D đều phải được đưa vào kết quả.
+          + Nếu một đáp án chỉ có Hiragana/Katakana nhưng là từ có nghĩa JLPT, vẫn phải liệt kê.
+          + Nếu từ nằm trong A/B/C/D thì "source" phải ghi đúng "A", "B", "C" hoặc "D"; nếu nằm ở câu hỏi thì ghi "question"; nếu nằm ở đoạn đọc thì ghi "passage".
+          + Trước khi trả JSON, tự kiểm tra: A đã quét chưa? B đã quét chưa? C đã quét chưa? D đã quét chưa?
         - Phải xét đủ 4 nhóm:
           1. Kanji: 学校, 勉強, 必要, 生活...
           2. Kanji + Kana: 食べる, 読みます, 受け取る...
@@ -2344,7 +2354,18 @@
 
             const grammarRule = `
         QUY TẮC RIÊNG CHO NGỮ PHÁP / CẤU TRÚC — KẾT QUẢ ĐƯA VÀO Ô GHI CHÚ:
-        - Liệt kê mẫu ngữ pháp/cấu trúc xuất hiện trong ĐOẠN ĐỌC, CÂU HỎI, đáp án A/B/C/D.
+        - Liệt kê mẫu ngữ pháp/cấu trúc xuất hiện trong ĐOẠN ĐỌC nếu có, CÂU HỎI, và đáp án A/B/C/D.
+        - PHẦN Ô GHI CHÚ PHẢI CÓ MỤC PHÂN TÍCH NGỮ PHÁP: các item trả về ở mode="grammar" sẽ được đổ vào ô Ghi chú / Phân tích ngữ pháp.
+        - QUY TẮC CỨNG CHO NGỮ PHÁP TRONG ĐÁP ÁN A/B/C/D:
+          + Phải quét lần lượt đủ 4 vùng OPTION_A_TEXT, OPTION_B_TEXT, OPTION_C_TEXT, OPTION_D_TEXT.
+          + Không chỉ phân tích đáp án đúng; mọi mẫu/cụm cấu trúc xuất hiện trong A, B, C hoặc D đều phải được đưa vào nếu có giá trị ôn JLPT.
+          + Nếu mẫu nằm trong A/B/C/D thì "source" phải ghi đúng "A", "B", "C" hoặc "D"; nếu nằm ở câu hỏi thì ghi "question"; nếu nằm ở đoạn đọc thì ghi "passage".
+          + Trước khi trả JSON, tự kiểm tra: ngữ pháp trong câu hỏi đã quét chưa? A đã quét chưa? B đã quét chưa? C đã quét chưa? D đã quét chưa?
+        - Cần nhận diện cả:
+          + Mẫu ngữ pháp rõ ràng: 〜ように, 〜ために, 〜ばかり, 〜ても, 〜ながら, 〜ことになる...
+          + Cấu trúc câu/cách nối: Vてから, Vないで, Nによって, Nとして, Aくなる, Vようと思う...
+          + Cụm cố định/cặp cấu trúc hay thi: 〜だけでなく〜も, 〜たり〜たり, 〜かどうか, 〜ば〜ほど...
+          + Cách dùng trợ từ/cụm trợ từ có giá trị ôn thi: に対して, によると, として, について, に比べて...
         - Không lấy từ vựng đơn lẻ.
         - Không lấy trợ từ quá cơ bản nếu không có giá trị ôn thi.
         - "pattern" ghi mẫu/cụm cấu trúc đúng để học và nhận diện.
@@ -2382,10 +2403,12 @@
         ${vocabRule}
 
         NHIỆM VỤ:
-        - common_items: lấy từ vựng xuất hiện trong ĐOẠN ĐỌC chung.
+        - common_items: chỉ lấy từ vựng xuất hiện trong ĐOẠN ĐỌC chung và KHÔNG nằm trong câu hỏi/A/B/C/D.
         - questions[].items: lấy từ vựng xuất hiện trong CÂU HỎI và đáp án A/B/C/D của đúng QUESTION_INDEX.
+        - Với từng QUESTION_INDEX, bắt buộc quét đủ 4 vùng OPTION_A_TEXT, OPTION_B_TEXT, OPTION_C_TEXT, OPTION_D_TEXT.
         - Nếu một từ chỉ nằm trong đoạn đọc, đưa vào common_items, không lặp lại ở questions[].items.
-        - Nếu một từ nằm trong câu hỏi hoặc A/B/C/D, đưa vào đúng QUESTION_INDEX.
+        - Nếu một từ nằm trong câu hỏi hoặc A/B/C/D, bắt buộc đưa vào đúng QUESTION_INDEX, kể cả khi từ đó cũng xuất hiện trong đoạn đọc.
+        - Không được bỏ trống questions[].items nếu A/B/C/D có từ/cụm đáng học.
         - Bắt buộc xét Kanji, Hiragana, Katakana, từ hỗn hợp Kanji+Kana.
         - Cặp đồng nghĩa A=B và B=A chỉ trả 1 item. Sau khi đã trả cặp, bỏ qua từng từ đơn lẻ của cặp đó.
 
@@ -2416,8 +2439,10 @@
         NHIỆM VỤ:
         - common_items: lấy mẫu ngữ pháp/cấu trúc xuất hiện trong ĐOẠN ĐỌC chung.
         - questions[].items: lấy mẫu ngữ pháp/cấu trúc xuất hiện trong CÂU HỎI và đáp án A/B/C/D của đúng QUESTION_INDEX.
+        - Với từng QUESTION_INDEX, bắt buộc quét đủ 4 vùng OPTION_A_TEXT, OPTION_B_TEXT, OPTION_C_TEXT, OPTION_D_TEXT.
         - Nếu cấu trúc chỉ nằm trong đoạn đọc, đưa vào common_items, không lặp lại ở questions[].items.
-        - Nếu cấu trúc nằm trong câu hỏi hoặc A/B/C/D, đưa vào đúng QUESTION_INDEX.
+        - Nếu cấu trúc nằm trong câu hỏi hoặc A/B/C/D, đưa vào đúng QUESTION_INDEX và ghi source chính xác.
+        - Không được bỏ trống questions[].items nếu câu hỏi hoặc A/B/C/D có mẫu/cấu trúc đáng học.
         - Bắt buộc ghi quick_sign nếu có dấu hiệu nhận dạng nhanh cho cách dùng từ, sắp xếp câu, dấu sao.
 
         Trả JSON đúng schema:
@@ -2445,6 +2470,14 @@
         ${vocabRule}
 
         Hãy liệt kê từ vựng có trong ĐOẠN ĐỌC nếu có, CÂU HỎI và đáp án A/B/C/D.
+        Trước khi trả JSON, bắt buộc quét đủ từng vùng:
+        - CÂU HỎI
+        - OPTION_A_TEXT
+        - OPTION_B_TEXT
+        - OPTION_C_TEXT
+        - OPTION_D_TEXT
+        Không chỉ lấy đáp án đúng; phải lấy từ/cụm đáng học ở cả 4 đáp án.
+        Nếu A/B/C/D có từ vựng đáng học thì items không được rỗng.
         Bắt buộc xét:
         - Kanji
         - Hiragana
@@ -2474,7 +2507,9 @@
         ${grammarRule}
 
         Hãy liệt kê ngữ pháp/cấu trúc có trong ĐOẠN ĐỌC nếu có, CÂU HỎI và đáp án A/B/C/D.
-        Kết quả này dùng cho Ô GHI CHÚ, nên ưu tiên:
+        Bắt buộc quét đủ các vùng: CÂU HỎI, OPTION_A_TEXT, OPTION_B_TEXT, OPTION_C_TEXT, OPTION_D_TEXT.
+        Không chỉ lấy đáp án đúng; A/B/C/D có mẫu ngữ pháp/cấu trúc nào đáng học thì đều phải liệt kê và ghi source đúng.
+        Kết quả này dùng cho Ô GHI CHÚ / PHÂN TÍCH NGỮ PHÁP, nên ưu tiên:
         - mẫu ngữ pháp
         - công thức/cách nối
         - dấu hiệu nhận dạng nhanh
@@ -2589,12 +2624,25 @@
                 return 'Không phát hiện mẫu ngữ pháp chắc chắn trong dữ liệu đã cho.';
             }
 
+            const sourceLabelMap = {
+                passage: 'Đoạn đọc',
+                question: 'Câu hỏi',
+                A: 'A',
+                B: 'B',
+                C: 'C',
+                D: 'D'
+            };
+
             return items.map(item => {
                 const pattern = answerTableEscapeHtml(item.pattern || '');
+                if (!pattern) return '';
+                const sourceRaw = String(item.source || '').trim();
+                const sourceLabel = sourceLabelMap[sourceRaw] || sourceRaw;
+                const source = sourceLabel ? `【${answerTableEscapeHtml(sourceLabel)}】 ` : '';
                 const meaning = item.meaning_vi ? `: ${answerTableEscapeHtml(item.meaning_vi)}` : '';
                 const note = item.note ? ` — ${answerTableEscapeHtml(item.note)}` : '';
                 const quickSign = item.quick_sign ? ` — Dấu hiệu: ${answerTableEscapeHtml(item.quick_sign)}` : '';
-                return `${pattern}${meaning}${note}${quickSign}`;
+                return `${source}${pattern}${meaning}${note}${quickSign}`;
             }).filter(Boolean).join('<br>');
         }
 
@@ -2807,7 +2855,7 @@
                         q.note = upsertAIBlock(
                             q.note || '',
                             'ai-grammar',
-                            'AI ngữ pháp câu hỏi + A/B/C/D',
+                            'Phân tích ngữ pháp: câu hỏi + A/B/C/D',
                             html
                         );
                     }
@@ -2917,7 +2965,7 @@
                             q.note = upsertAIBlock(
                                 q.note || '',
                                 'ai-grammar',
-                                'AI ngữ pháp câu hỏi + A/B/C/D',
+                                'Phân tích ngữ pháp: câu hỏi + A/B/C/D',
                                 html
                             );
                         }
@@ -2989,7 +3037,7 @@
                         q.note = upsertAIBlock(
                             q.note || '',
                             'ai-grammar',
-                            'AI ngữ pháp câu hỏi + A/B/C/D',
+                            'Phân tích ngữ pháp: câu hỏi + A/B/C/D',
                             html
                         );
                     }
@@ -3084,7 +3132,7 @@
                             q.note = upsertAIBlock(
                                 q.note || '',
                                 'ai-grammar',
-                                'AI ngữ pháp câu hỏi + A/B/C/D',
+                                'Phân tích ngữ pháp: câu hỏi + A/B/C/D',
                                 html
                             );
                         }
@@ -4474,12 +4522,12 @@
                                 </div>
                                 <div class="explain-field-wrap note-wrap">
                                     <div class="explain-field-label">
-                                        📝 Ghi chú
+                                        📝 Ghi chú / Phân tích ngữ pháp
                                         <span class="ai-mini-actions">
-                                            <button type="button" class="ai-mini-btn grammar" onclick="runQuestionAI(${actualSectionIndex}, ${gIdx}, ${qIdx}, 'grammar')">AI ngữ pháp</button>
+                                            <button type="button" class="ai-mini-btn grammar" title="Liệt kê mẫu ngữ pháp trong câu hỏi và A/B/C/D" onclick="runQuestionAI(${actualSectionIndex}, ${gIdx}, ${qIdx}, 'grammar')">AI ngữ pháp</button>
                                         </span>
                                     </div>
-                                    <div contenteditable="true" class="question-note editor-input" tabindex="-1" data-g-idx="${gIdx}" data-q-idx="${qIdx}" placeholder="Ghi chú riêng cho câu này..." oninput="handleNoteInput(this)" onkeydown="handleExplainKeydown(event, this)">${explainFields.note || ''}</div>
+                                    <div contenteditable="true" class="question-note editor-input" tabindex="-1" data-g-idx="${gIdx}" data-q-idx="${qIdx}" placeholder="VD: 【Câu hỏi】 〜ようにする: cố gắng làm... / AI ngữ pháp sẽ quét câu hỏi và A,B,C,D" oninput="handleNoteInput(this)" onkeydown="handleExplainKeydown(event, this)">${explainFields.note || ''}</div>
                                 </div>
                             </div>
                         <div class="options-grid" ${sec.type === 'youhou' ? 'style="grid-template-columns: 1fr;"' : ''}>${optsHTML}</div>
@@ -7068,7 +7116,7 @@
                                             <div contenteditable="true" class="bulk-exp-input bulk-exp-vocab" data-s="${sIdx}" data-g="${gIdx}" data-q="${qIdx}" placeholder="VD: 海岸(かいがん) HẢI NGẠN - bờ biển" oninput="handleBulkExplanationInput(this, event)" onkeydown="handleBulkExpKeydown(event, this)">${getExplanationDisplayHtml(explainFields.explanation || '')}</div>
                                         </div>
                                         <div class="bulk-exp-pane note-pane">
-                                            <div class="bulk-exp-sub-label">📝 Ghi chú <span class="ai-mini-actions"><button type="button" class="ai-mini-btn grammar" onclick="runBulkQuestionAI(${sIdx}, ${gIdx}, ${qIdx}, 'grammar')">AI ngữ pháp</button></span></div>
+                                            <div class="bulk-exp-sub-label">📝 Ghi chú / Phân tích ngữ pháp <span class="ai-mini-actions"><button type="button" class="ai-mini-btn grammar" title="Liệt kê mẫu ngữ pháp trong câu hỏi và A/B/C/D" onclick="runBulkQuestionAI(${sIdx}, ${gIdx}, ${qIdx}, 'grammar')">AI ngữ pháp</button></span></div>
                                             <div contenteditable="true" class="bulk-note-input" data-s="${sIdx}" data-g="${gIdx}" data-q="${qIdx}" placeholder="Ghi chú riêng..." oninput="handleBulkNoteInput(this)" onkeydown="handleBulkExpKeydown(event, this)">${explainFields.note || ''}</div>
                                         </div>
                                     </div>
