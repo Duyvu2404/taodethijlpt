@@ -1344,6 +1344,27 @@
         #furigana-popover .btn-save-furigana { background: #4f46e5; color: #ffffff; }
         #furigana-popover .btn-remove-furigana { background: #fee2e2; color: #b91c1c; }
 
+
+        /* --- TUỲ CHỌN IN LỜI GIẢI THEO MONDAI KHI XUẤT GV / BẢNG ĐÁP ÁN --- */
+        .export-explanation-scope-panel { border: 1px solid #c7d2fe; background: linear-gradient(180deg, #eef2ff, #ffffff); border-radius: 12px; padding: 12px; margin: 0 0 12px 0; }
+        .export-explanation-scope-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+        .export-explanation-scope-title { font-size: 13px; font-weight: 900; color: #3730a3; line-height: 1.35; }
+        .export-explanation-scope-desc { font-size: 11px; color: #64748b; font-weight: 700; line-height: 1.45; margin-top: 3px; }
+        .export-explanation-scope-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; flex-shrink: 0; }
+        .export-explanation-scope-actions button { border: 1px solid #c7d2fe; background: #ffffff; color: #4338ca; padding: 6px 9px; border-radius: 999px; font-size: 11px; font-weight: 900; cursor: pointer; transition: .2s; }
+        .export-explanation-scope-actions button:hover { background: #e0e7ff; border-color: #818cf8; }
+        .export-explanation-mondai-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; max-height: 180px; overflow-y: auto; padding-right: 4px; }
+        .export-explanation-mondai-list::-webkit-scrollbar { width: 6px; }
+        .export-explanation-mondai-list::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .export-explanation-mondai-option { display: flex; align-items: flex-start; gap: 8px; border: 1px solid #e2e8f0; background: #f8fafc; border-radius: 10px; padding: 8px 9px; cursor: pointer; user-select: none; min-width: 0; transition: .2s; }
+        .export-explanation-mondai-option:hover { border-color: #818cf8; background: #eef2ff; }
+        .export-explanation-mondai-option input { margin-top: 2px; accent-color: #4f46e5; flex-shrink: 0; }
+        .export-explanation-mondai-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+        .export-explanation-mondai-name { color: #1e3a8a; font-size: 12px; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .export-explanation-mondai-meta { color: #64748b; font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .export-explanation-scope-status { margin-top: 9px; font-size: 11px; font-weight: 800; color: #047857; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; padding: 7px 9px; line-height: 1.4; }
+        .export-explanation-scope-status.warning { color: #b45309; background: #fffbeb; border-color: #fde68a; }
+
         /* --- BẢNG ĐÁP ÁN + LỜI GIẢI THEO MẪU EXCEL --- */
         .answer-table-hint {
             font-size: 11px;
@@ -1680,7 +1701,7 @@
     </div>
 
     <div id="export-modal" class="modal-overlay">
-        <div class="modal-content" style="width: 500px;">
+        <div class="modal-content" style="width: 720px; max-height: 92vh; overflow-y: auto;">
             <h3 style="margin-top: 0; margin-bottom: 20px;">Tùy Chọn Xuất Đề Thi</h3>
             <div class="export-menu-btn" onclick="executeExport('student')">
                 <div class="icon">📄</div>
@@ -1702,9 +1723,28 @@
                     </label>
                 </div>
             </div>
+
+            <div class="export-explanation-scope-panel">
+                <div class="export-explanation-scope-head">
+                    <div>
+                        <div class="export-explanation-scope-title">📝 Chọn Mondai được in lời giải</div>
+                        <div class="export-explanation-scope-desc">
+                            Áp dụng cho <b>Word giáo viên</b> và <b>Excel bảng đáp án</b>. Tắt Mondai nào thì Mondai đó vẫn hiện đáp án, nhưng ẩn toàn bộ từ vựng/lời giải, ghi chú và phân tích ngữ pháp.
+                        </div>
+                    </div>
+                    <div class="export-explanation-scope-actions">
+                        <button type="button" onclick="setExportExplanationSelection('all')">Chọn tất cả</button>
+                        <button type="button" onclick="setExportExplanationSelection('none')">Bỏ hết lời giải</button>
+                        <button type="button" onclick="setExportExplanationSelection('active')">Chỉ Mondai đang mở</button>
+                    </div>
+                </div>
+                <div id="export-explanation-mondai-list" class="export-explanation-mondai-list"></div>
+                <div id="export-explanation-scope-status" class="export-explanation-scope-status"></div>
+            </div>
+
             <div class="export-menu-btn" onclick="executeExport('teacher')">
                 <div class="icon">✅</div>
-                <div class="info"><b>Xuất file Word (Giáo Viên)</b><span>Tô đỏ đáp án đúng + Lời giải chi tiết.</span></div>
+                <div class="info"><b>Xuất file Word (Giáo Viên)</b><span>Tô đỏ đáp án đúng; lời giải chỉ in theo Mondai đã tick ở trên.</span></div>
             </div>
             <div style="display: flex; justify-content: flex-end; margin-top: 20px;">
                 <button class="action-btn" style="background: #e2e8f0; color: #334155;" onclick="closeModals()">Đóng</button>
@@ -5050,7 +5090,8 @@ ${getPlainTextForAI(opt)}`;
                     span.setAttribute('data-blank-count', autoTotal);
                 } else {
                     span.removeAttribute('data-blank-sub-index');
-                    span.removeAttribute('data-blank-count');
+                    span.removeAttribute('d
+ata-blank-count');
                 }
 
                 span.textContent = getPassageBlankLabel(group, idx, autoOccurrence, autoTotal, explicitSlot);
@@ -7182,7 +7223,102 @@ ${getPlainTextForAI(opt)}`;
             setTimeout(() => { const firstInput = document.getElementById('bulk-input-0'); if(firstInput) firstInput.focus(); }, 100);
         }
         
-        function openExportModal() { document.getElementById('export-modal').style.display = 'flex'; }
+        let exportExplanationSelectionCache = null;
+
+        function getExportMondaiTitleForControl(sec, sIdx) {
+            const titleText = getPlainTextFromHtmlForAnswerTable(refreshSectionTitleBlankLabels(sec?.title || '', sec || {})).replace(/\s+/g, ' ').trim();
+            const found = titleText.match(/問題\s*[０-９0-9]+/);
+            return found ? found[0].replace(/\s+/g, '') : ('Mondai ' + (sIdx + 1));
+        }
+
+        function getExportMondaiQuestionCount(sec) {
+            return (sec?.groups || []).reduce((sum, group) => sum + ((group?.questions || []).length), 0);
+        }
+
+        function getExportExplanationSelectedIndexesFromDOM() {
+            const boxes = Array.from(document.querySelectorAll('.export-explanation-mondai-check'));
+            return boxes.filter(box => box.checked).map(box => parseInt(box.getAttribute('data-sidx'), 10)).filter(idx => !Number.isNaN(idx));
+        }
+
+        function updateExportExplanationStatus() {
+            const status = document.getElementById('export-explanation-scope-status');
+            const boxes = Array.from(document.querySelectorAll('.export-explanation-mondai-check'));
+            if (!status) return;
+            const total = boxes.length;
+            const selected = boxes.filter(box => box.checked).length;
+            status.classList.toggle('warning', selected === 0);
+            if (!total) {
+                status.textContent = 'Chưa có Mondai nào trong đề để chọn lời giải.';
+            } else if (selected === 0) {
+                status.textContent = 'Đang tắt toàn bộ lời giải: Word giáo viên chỉ tô đỏ đáp án đúng; Excel chỉ xuất bảng đáp án.';
+            } else if (selected === total) {
+                status.textContent = 'Đang bật lời giải cho tất cả Mondai: Word giáo viên và Excel sẽ xuất đầy đủ từ vựng/lời giải, ghi chú, phân tích ngữ pháp.';
+            } else {
+                status.textContent = 'Đang bật lời giải cho ' + selected + '/' + total + ' Mondai. Các Mondai không tick vẫn xuất đáp án nhưng ẩn lời giải.';
+            }
+        }
+
+        function cacheExportExplanationSelectionFromDOM() {
+            exportExplanationSelectionCache = new Set(getExportExplanationSelectedIndexesFromDOM().map(idx => String(idx)));
+            updateExportExplanationStatus();
+        }
+
+        function renderExportExplanationMondaiControls() {
+            const container = document.getElementById('export-explanation-mondai-list');
+            if (!container) return;
+
+            const activeIndexes = (examSections || []).map((_, idx) => String(idx));
+            const cacheUsable = exportExplanationSelectionCache instanceof Set && activeIndexes.some(idx => exportExplanationSelectionCache.has(idx));
+            const selectedSet = cacheUsable ? exportExplanationSelectionCache : new Set(activeIndexes);
+
+            if (!examSections || !examSections.length) {
+                container.innerHTML = '<div style="font-size:12px;color:#64748b;font-weight:700;">Chưa có Mondai nào để chọn.</div>';
+                updateExportExplanationStatus();
+                return;
+            }
+
+            container.innerHTML = examSections.map((sec, sIdx) => {
+                const mondaiName = getExportMondaiTitleForControl(sec, sIdx);
+                const partName = parentLabels[sec.parentType] || sec.parentType || 'Phần';
+                const count = getExportMondaiQuestionCount(sec);
+                const checked = selectedSet.has(String(sIdx)) ? 'checked' : '';
+                const titleText = getPlainTextFromHtmlForAnswerTable(refreshSectionTitleBlankLabels(sec.title || '', sec)).replace(/\s+/g, ' ').trim();
+                const shortTitle = titleText && titleText !== mondaiName ? titleText : (sec.label || '');
+                return `
+                    <label class="export-explanation-mondai-option" title="${answerTableEscapeHtml(titleText || mondaiName)}">
+                        <input type="checkbox" class="export-explanation-mondai-check" data-sidx="${sIdx}" ${checked} onchange="cacheExportExplanationSelectionFromDOM()">
+                        <span class="export-explanation-mondai-text">
+                            <span class="export-explanation-mondai-name">${answerTableEscapeHtml(mondaiName)} · ${answerTableEscapeHtml(partName)}</span>
+                            <span class="export-explanation-mondai-meta">${count} câu${shortTitle ? ' · ' + answerTableEscapeHtml(shortTitle) : ''}</span>
+                        </span>
+                    </label>
+                `;
+            }).join('');
+
+            cacheExportExplanationSelectionFromDOM();
+        }
+
+        function setExportExplanationSelection(mode) {
+            const boxes = Array.from(document.querySelectorAll('.export-explanation-mondai-check'));
+            if (!boxes.length) return;
+            boxes.forEach(box => {
+                const sIdx = parseInt(box.getAttribute('data-sidx'), 10);
+                if (mode === 'all') box.checked = true;
+                else if (mode === 'none') box.checked = false;
+                else if (mode === 'active') box.checked = sIdx === activeSectionIndex;
+            });
+            cacheExportExplanationSelectionFromDOM();
+        }
+
+        function getExportExplanationOptionsFromModal() {
+            cacheExportExplanationSelectionFromDOM();
+            return { explanationSectionIndexes: getExportExplanationSelectedIndexesFromDOM() };
+        }
+
+        function openExportModal() {
+            renderExportExplanationMondaiControls();
+            document.getElementById('export-modal').style.display = 'flex';
+        }
         function closeModals() { document.querySelectorAll('.modal-overlay').forEach(m => m.style.display = 'none'); forceAutoSave(); }
         
         function applyBulkExplanations() {
@@ -7980,19 +8116,40 @@ ${getPlainTextForAI(opt)}`;
             return map[raw] || raw;
         }
 
-        function collectAnswerExplanationRowsForTable() {
+        function getExportExplanationSectionIndexesFromOptions(exportOptions = {}) {
+            if (!exportOptions || !Array.isArray(exportOptions.explanationSectionIndexes)) return null;
+            return new Set(exportOptions.explanationSectionIndexes.map(idx => String(idx)));
+        }
+
+        function shouldExportExplanationForSection(sIdx, exportOptions = {}) {
+            const selectedSet = getExportExplanationSectionIndexesFromOptions(exportOptions);
+            if (!selectedSet) return true;
+            return selectedSet.has(String(sIdx));
+        }
+
+        function isAnswerOnlyExportMode(exportOptions = {}) {
+            const selectedSet = getExportExplanationSectionIndexesFromOptions(exportOptions);
+            return !!selectedSet && selectedSet.size === 0;
+        }
+
+        function collectAnswerExplanationRowsForTable(exportOptions = {}) {
             const rows = [];
             const sectionNumberByPart = {};
             (examSections || []).forEach((sec, sIdx) => {
                 const partName = getAnswerTablePartName(sec.parentType);
                 sectionNumberByPart[sec.parentType] = (sectionNumberByPart[sec.parentType] || 0) + 1;
                 const mondaiLabel = getMondaiLabelForAnswerTable(sec, sectionNumberByPart[sec.parentType]);
+                const includeExplanationForThisSection = shouldExportExplanationForSection(sIdx, exportOptions);
 
                 (sec.groups || []).forEach((group, gIdx) => {
                     (group.questions || []).forEach((q, qIdx) => {
                         ensureQuestionExplanationFields(q);
-                        const parsed = parseAnswerExplanationForTable(q.explanation || '');
-                        const noteText = getPlainTextFromHtmlForAnswerTable(q.note || '') || parsed.note || '';
+                        const parsed = includeExplanationForThisSection
+                            ? parseAnswerExplanationForTable(q.explanation || '')
+                            : { entries: [{ kanji: '', hanviet: '', hiragana: '', meaning: '' }], note: '' };
+                        const noteText = includeExplanationForThisSection
+                            ? (getPlainTextFromHtmlForAnswerTable(q.note || '') || parsed.note || '')
+                            : '';
                         const qLabel = 'Câu ' + (q.id || (qIdx + 1));
                         const answer = answerChoiceToNumber(q.correct || '');
                         parsed.entries.forEach((entry, entryIdx) => {
@@ -8004,11 +8161,11 @@ ${getPlainTextForAI(opt)}`;
                                 mondai: mondaiLabel,
                                 question: qLabel,
                                 answer,
-                                kanji: entry.kanji || '',
-                                hanviet: entry.hanviet || '',
-                                hiragana: entry.hiragana || '',
-                                meaning: entry.meaning || '',
-                                note: noteText || ''
+                                kanji: includeExplanationForThisSection ? (entry.kanji || '') : '',
+                                hanviet: includeExplanationForThisSection ? (entry.hanviet || '') : '',
+                                hiragana: includeExplanationForThisSection ? (entry.hiragana || '') : '',
+                                meaning: includeExplanationForThisSection ? (entry.meaning || '') : '',
+                                note: includeExplanationForThisSection ? (noteText || '') : ''
                             });
                         });
                     });
@@ -8030,41 +8187,66 @@ ${getPlainTextForAI(opt)}`;
                    ".answer-explanation-table .col-question { width:8%; } .answer-explanation-table .col-answer { width:8%; } " +
                    ".answer-explanation-table .col-kanji { width:10%; } .answer-explanation-table .col-hanviet { width:12%; } " +
                    ".answer-explanation-table .col-hiragana { width:12%; } .answer-explanation-table .col-meaning { width:15%; } " +
-                   ".answer-explanation-table .col-note { width:15%; } ";
+                   ".answer-explanation-table .col-note { width:15%; } " +
+                   ".answer-explanation-table .col-answer-only-part { width:30%; } .answer-explanation-table .col-answer-only-mondai { width:20%; } " +
+                   ".answer-explanation-table .col-answer-only-question { width:25%; } .answer-explanation-table .col-answer-only-answer { width:25%; } ";
         }
 
-        function buildAnswerExplanationTableHtml(filename) {
-            const rows = collectAnswerExplanationRowsForTable();
+        function buildAnswerExplanationTableHtml(filename, exportOptions = {}) {
+            const rows = collectAnswerExplanationRowsForTable(exportOptions);
+            const answerOnly = isAnswerOnlyExportMode(exportOptions);
             let html = "<div class='answer-explanation-section'>";
-            html += "<h2 class='answer-explanation-title'>" + answerTableEscapeHtml((filename || 'ĐỀ THI').toUpperCase()) + " - BẢNG ĐÁP ÁN + LỜI GIẢI</h2>";
+            html += "<h2 class='answer-explanation-title'>" + answerTableEscapeHtml((filename || 'ĐỀ THI').toUpperCase()) + (answerOnly ? " - BẢNG ĐÁP ÁN" : " - BẢNG ĐÁP ÁN + LỜI GIẢI") + "</h2>";
             html += "<table class='answer-explanation-table'>";
-            html += "<colgroup>" +
-                    "<col class='col-part'><col class='col-mondai'><col class='col-question'><col class='col-answer'>" +
-                    "<col class='col-kanji'><col class='col-hanviet'><col class='col-hiragana'><col class='col-meaning'><col class='col-note'>" +
-                    "</colgroup>";
-            html += "<thead>";
-            html += "<tr><th rowspan='2'>Phần</th><th rowspan='2'>Mondai</th><th rowspan='2'>Câu hỏi</th><th rowspan='2'>Đáp án</th><th colspan='4'>Lời giải</th><th rowspan='2'>Ghi chú</th></tr>";
-            html += "<tr class='subhead'><th>Kanji</th><th>Âm Hán</th><th>Hiragana / Katakana</th><th>Nghĩa</th></tr>";
-            html += "</thead><tbody>";
 
-            if (!rows.length) {
-                html += "<tr><td colspan='9' class='center'>Chưa có câu hỏi để tạo bảng đáp án.</td></tr>";
+            if (answerOnly) {
+                html += "<colgroup>" +
+                        "<col class='col-answer-only-part'><col class='col-answer-only-mondai'><col class='col-answer-only-question'><col class='col-answer-only-answer'>" +
+                        "</colgroup>";
+                html += "<thead><tr><th>Phần</th><th>Mondai</th><th>Câu hỏi</th><th>Đáp án</th></tr></thead><tbody>";
+                if (!rows.length) {
+                    html += "<tr><td colspan='4' class='center'>Chưa có câu hỏi để tạo bảng đáp án.</td></tr>";
+                } else {
+                    rows.forEach(row => {
+                        html += "<tr>";
+                        if (!row.skip_partKey) html += "<td rowspan='" + row.span_partKey + "' class='center wrap'>" + answerTableEscapeHtml(row.part) + "</td>";
+                        if (!row.skip_mondaiKey) html += "<td rowspan='" + row.span_mondaiKey + "' class='center wrap'>" + answerTableEscapeHtml(row.mondai) + "</td>";
+                        if (!row.skip_questionKey) {
+                            html += "<td rowspan='" + row.span_questionKey + "' class='center'>" + answerTableEscapeHtml(row.question) + "</td>";
+                            html += "<td rowspan='" + row.span_questionKey + "' class='center'>" + answerTableEscapeHtml(row.answer) + "</td>";
+                        }
+                        html += "</tr>";
+                    });
+                }
             } else {
-                rows.forEach(row => {
-                    html += "<tr>";
-                    if (!row.skip_partKey) html += "<td rowspan='" + row.span_partKey + "' class='center wrap'>" + answerTableEscapeHtml(row.part) + "</td>";
-                    if (!row.skip_mondaiKey) html += "<td rowspan='" + row.span_mondaiKey + "' class='center wrap'>" + answerTableEscapeHtml(row.mondai) + "</td>";
-                    if (!row.skip_questionKey) {
-                        html += "<td rowspan='" + row.span_questionKey + "' class='center'>" + answerTableEscapeHtml(row.question) + "</td>";
-                        html += "<td rowspan='" + row.span_questionKey + "' class='center'>" + answerTableEscapeHtml(row.answer) + "</td>";
-                    }
-                    html += "<td class='center wrap'>" + answerTableEscapeHtml(row.kanji) + "</td>";
-                    html += "<td class='center wrap'>" + answerTableEscapeHtml(row.hanviet) + "</td>";
-                    html += "<td class='center wrap'>" + answerTableEscapeHtml(row.hiragana) + "</td>";
-                    html += "<td class='wrap'>" + answerTableEscapeHtml(row.meaning) + "</td>";
-                    if (!row.skip_questionKey) html += "<td rowspan='" + row.span_questionKey + "' class='wrap'>" + answerTableEscapeHtml(row.note) + "</td>";
-                    html += "</tr>";
-                });
+                html += "<colgroup>" +
+                        "<col class='col-part'><col class='col-mondai'><col class='col-question'><col class='col-answer'>" +
+                        "<col class='col-kanji'><col class='col-hanviet'><col class='col-hiragana'><col class='col-meaning'><col class='col-note'>" +
+                        "</colgroup>";
+                html += "<thead>";
+                html += "<tr><th rowspan='2'>Phần</th><th rowspan='2'>Mondai</th><th rowspan='2'>Câu hỏi</th><th rowspan='2'>Đáp án</th><th colspan='4'>Lời giải</th><th rowspan='2'>Ghi chú</th></tr>";
+                html += "<tr class='subhead'><th>Kanji</th><th>Âm Hán</th><th>Hiragana / Katakana</th><th>Nghĩa</th></tr>";
+                html += "</thead><tbody>";
+
+                if (!rows.length) {
+                    html += "<tr><td colspan='9' class='center'>Chưa có câu hỏi để tạo bảng đáp án.</td></tr>";
+                } else {
+                    rows.forEach(row => {
+                        html += "<tr>";
+                        if (!row.skip_partKey) html += "<td rowspan='" + row.span_partKey + "' class='center wrap'>" + answerTableEscapeHtml(row.part) + "</td>";
+                        if (!row.skip_mondaiKey) html += "<td rowspan='" + row.span_mondaiKey + "' class='center wrap'>" + answerTableEscapeHtml(row.mondai) + "</td>";
+                        if (!row.skip_questionKey) {
+                            html += "<td rowspan='" + row.span_questionKey + "' class='center'>" + answerTableEscapeHtml(row.question) + "</td>";
+                            html += "<td rowspan='" + row.span_questionKey + "' class='center'>" + answerTableEscapeHtml(row.answer) + "</td>";
+                        }
+                        html += "<td class='center wrap'>" + answerTableEscapeHtml(row.kanji) + "</td>";
+                        html += "<td class='center wrap'>" + answerTableEscapeHtml(row.hanviet) + "</td>";
+                        html += "<td class='center wrap'>" + answerTableEscapeHtml(row.hiragana) + "</td>";
+                        html += "<td class='wrap'>" + answerTableEscapeHtml(row.meaning) + "</td>";
+                        if (!row.skip_questionKey) html += "<td rowspan='" + row.span_questionKey + "' class='wrap'>" + answerTableEscapeHtml(row.note) + "</td>";
+                        html += "</tr>";
+                    });
+                }
             }
 
             html += "</tbody></table></div>";
@@ -8072,10 +8254,40 @@ ${getPlainTextForAI(opt)}`;
         }
 
 
-        function collectAnswerExplanationSheetData(filename) {
-            const rows = collectAnswerExplanationRowsForTable();
+        function collectAnswerExplanationSheetData(filename, exportOptions = {}) {
+            const rows = collectAnswerExplanationRowsForTable(exportOptions);
+            const answerOnly = isAnswerOnlyExportMode(exportOptions);
             const aoa = [];
             const merges = [];
+
+            if (answerOnly) {
+                aoa.push([String(filename || 'ĐỀ THI').toUpperCase() + ' - BẢNG ĐÁP ÁN', '', '', '']);
+                merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: 3 } });
+                aoa.push(['Phần', 'Mondai', 'Câu hỏi', 'Đáp án']);
+
+                if (!rows.length) {
+                    aoa.push(['', '', 'Chưa có câu hỏi để tạo bảng đáp án.', '']);
+                    merges.push({ s: { r: 2, c: 0 }, e: { r: 2, c: 3 } });
+                } else {
+                    rows.forEach(row => {
+                        const r = aoa.length;
+                        aoa.push([
+                            row.skip_partKey ? '' : row.part,
+                            row.skip_mondaiKey ? '' : row.mondai,
+                            row.skip_questionKey ? '' : row.question,
+                            row.skip_questionKey ? '' : row.answer
+                        ]);
+                        if (!row.skip_partKey && row.span_partKey > 1) merges.push({ s: { r, c: 0 }, e: { r: r + row.span_partKey - 1, c: 0 } });
+                        if (!row.skip_mondaiKey && row.span_mondaiKey > 1) merges.push({ s: { r, c: 1 }, e: { r: r + row.span_mondaiKey - 1, c: 1 } });
+                        if (!row.skip_questionKey && row.span_questionKey > 1) {
+                            merges.push({ s: { r, c: 2 }, e: { r: r + row.span_questionKey - 1, c: 2 } });
+                            merges.push({ s: { r, c: 3 }, e: { r: r + row.span_questionKey - 1, c: 3 } });
+                        }
+                    });
+                }
+                return answerExcelCompactSheetData({ aoa, merges, colCount: 4, answerOnly: true });
+            }
+
             aoa.push([String(filename || 'ĐỀ THI').toUpperCase() + ' - BẢNG ĐÁP ÁN + LỜI GIẢI', '', '', '', '', '', '', '', '']);
             merges.push({ s: { r: 0, c: 0 }, e: { r: 0, c: 8 } });
             aoa.push(['Phần', 'Mondai', 'Câu hỏi', 'Đáp án', 'Lời giải', '', '', '', 'Ghi chú']);
@@ -8113,23 +8325,24 @@ ${getPlainTextForAI(opt)}`;
                     }
                 });
             }
-            return answerExcelCompactSheetData({ aoa, merges });
+            return answerExcelCompactSheetData({ aoa, merges, colCount: 9, answerOnly: false });
         }
 
-        function buildAnswerExplanationExcelHtml(filename) {
-            const tableHtml = buildAnswerExplanationTableHtml(filename);
+        function buildAnswerExplanationExcelHtml(filename, exportOptions = {}) {
+            const tableHtml = buildAnswerExplanationTableHtml(filename, exportOptions);
             return `<!DOCTYPE html><html><head><meta charset="utf-8">
                 <style>
                     body { font-family:'Times New Roman','MS Mincho',serif; background:#ffffff; }
                     h2 { text-align:center; font-size:16pt; color:#ffffff; background:#0f766e; padding:10px; margin:0 0 10px 0; }
                     table { border-collapse:collapse; table-layout:fixed; width:100%; }
-                    th,td { border:1px solid #1f2937; padding:7px 8px; vertical-align:middle; mso-number-format:'\\@'; white-space:normal; word-wrap:break-word; font-size:11pt; }
+                    th,td { border:1px solid #1f2937; padding:7px 8px; vertical-align:middle; mso-number-format:'\@'; white-space:normal; word-wrap:break-word; font-size:11pt; }
                     th { background:#fef08a; font-weight:bold; text-align:center; }
                     tr.subhead th { background:#d9ead3; }
                     td.center { text-align:center; }
                     td.wrap { white-space:normal; word-wrap:break-word; }
                     .col-part{width:12%;}.col-mondai{width:11%;}.col-question{width:10%;}.col-answer{width:8%;}
                     .col-kanji{width:14%;}.col-hanviet{width:15%;}.col-hiragana{width:17%;}.col-meaning{width:24%;}.col-note{width:32%;}
+                    .col-answer-only-part{width:30%;}.col-answer-only-mondai{width:20%;}.col-answer-only-question{width:25%;}.col-answer-only-answer{width:25%;}
                 </style></head><body>${tableHtml}</body></html>`;
         }
 
@@ -8178,9 +8391,9 @@ ${getPlainTextForAI(opt)}`;
                 .trim().length > 0;
         }
 
-        function answerExcelRowHasAnyText(rowValues) {
+        function answerExcelRowHasAnyText(rowValues, colCount = 9) {
             const row = rowValues || [];
-            for (let c = 0; c < 9; c++) {
+            for (let c = 0; c < colCount; c++) {
                 if (answerExcelCellHasText(row[c])) return true;
             }
             return false;
@@ -8188,13 +8401,16 @@ ${getPlainTextForAI(opt)}`;
 
         function answerExcelCompactSheetData(sheetData) {
             const oldAoa = sheetData.aoa || [];
+            const colCount = Math.max(1, Number(sheetData.colCount || 9));
+            const lastCol = colCount - 1;
             const rowMap = new Map();
             const aoa = [];
 
             oldAoa.forEach((rowValues, oldIndex) => {
-                const isHeaderRow = oldIndex <= 2;
-                const cleanRow = Array.from({ length: 9 }, (_, c) => (rowValues && rowValues[c] != null) ? rowValues[c] : '');
-                const keepRow = isHeaderRow || answerExcelRowHasAnyText(cleanRow);
+                const headerRowCount = sheetData.answerOnly ? 2 : 3;
+                const isHeaderRow = oldIndex < headerRowCount;
+                const cleanRow = Array.from({ length: colCount }, (_, c) => (rowValues && rowValues[c] != null) ? rowValues[c] : '');
+                const keepRow = isHeaderRow || answerExcelRowHasAnyText(cleanRow, colCount);
                 if (keepRow) {
                     rowMap.set(oldIndex, aoa.length);
                     aoa.push(cleanRow);
@@ -8208,14 +8424,14 @@ ${getPlainTextForAI(opt)}`;
                 }
                 if (!keptRows.length) return null;
                 const nextMerge = {
-                    s: { r: Math.min(...keptRows), c: Math.max(0, Math.min(8, merge.s.c)) },
-                    e: { r: Math.max(...keptRows), c: Math.max(0, Math.min(8, merge.e.c)) }
+                    s: { r: Math.min(...keptRows), c: Math.max(0, Math.min(lastCol, merge.s.c)) },
+                    e: { r: Math.max(...keptRows), c: Math.max(0, Math.min(lastCol, merge.e.c)) }
                 };
                 if (nextMerge.s.r === nextMerge.e.r && nextMerge.s.c === nextMerge.e.c) return null;
                 return nextMerge;
             }).filter(Boolean);
 
-            return { aoa, merges };
+            return { aoa, merges, colCount, answerOnly: !!sheetData.answerOnly };
         }
 
         function answerExcelVisualLength(value) {
@@ -8236,25 +8452,18 @@ ${getPlainTextForAI(opt)}`;
             }, 0);
         }
 
-        function answerExcelEstimateRowHeight(rowValues, rowIndex) {
+        function answerExcelEstimateRowHeight(rowValues, rowIndex, colWidths = [17, 13, 12, 10, 18, 20, 22, 36, 46], answerOnly = false) {
             if (rowIndex === 0) return { hpt: 32 };
-            if (rowIndex === 1 || rowIndex === 2) return { hpt: 26 };
+            if (rowIndex === 1 || (!answerOnly && rowIndex === 2)) return { hpt: 26 };
 
-            const colWidths = [17, 13, 12, 10, 18, 20, 22, 36, 46];
             const values = rowValues || [];
             let maxLines = 1;
 
-            // Ưu tiên vùng lời giải: Kanji / Âm Hán / Hiragana-Katakana / Nghĩa / Ghi chú
-            for (let c = 4; c <= 8; c++) {
+            for (let c = 0; c < colWidths.length; c++) {
                 maxLines = Math.max(maxLines, answerExcelEstimateTextLines(values[c], colWidths[c]));
             }
 
-            // Nếu câu hỏi/phần/mondai dài bất thường thì vẫn tự nâng chiều cao dòng.
-            for (let c = 0; c <= 3; c++) {
-                maxLines = Math.max(maxLines, answerExcelEstimateTextLines(values[c], colWidths[c]));
-            }
-
-            const hasExplanationText = values.slice(4, 9).some(v => String(v || '').trim());
+            const hasExplanationText = !answerOnly && values.slice(4, 9).some(v => String(v || '').trim());
             const minHeight = hasExplanationText ? 26 : 22;
             const estimated = 18 + maxLines * 13;
             return { hpt: Math.min(150, Math.max(minHeight, estimated)) };
@@ -8263,25 +8472,20 @@ ${getPlainTextForAI(opt)}`;
         function styleAnswerExplanationWorksheet(ws, sheetData) {
             const aoa = sheetData.aoa || [];
             const rowCount = aoa.length;
-            const colCount = 9;
+            const answerOnly = !!sheetData.answerOnly;
+            const colCount = answerOnly ? 4 : 9;
+            const lastColLetter = answerOnly ? 'D' : 'I';
             const lastRef = answerExcelEncodeCell(Math.max(rowCount - 1, 0), colCount - 1);
             ws['!ref'] = 'A1:' + lastRef;
             ws['!merges'] = sheetData.merges || [];
-            ws['!cols'] = [
-                { wch: 17 },
-                { wch: 13 },
-                { wch: 12 },
-                { wch: 10 },
-                { wch: 18 },
-                { wch: 20 },
-                { wch: 22 },
-                { wch: 36 },
-                { wch: 46 }
-            ];
-            ws['!rows'] = aoa.map((rowValues, rowIndex) => answerExcelEstimateRowHeight(rowValues, rowIndex));
+            const colWidths = answerOnly ? [20, 14, 14, 12] : [17, 13, 12, 10, 18, 20, 22, 36, 46];
+            ws['!cols'] = colWidths.map(wch => ({ wch }));
+            ws['!rows'] = aoa.map((rowValues, rowIndex) => answerExcelEstimateRowHeight(rowValues, rowIndex, colWidths, answerOnly));
             ws['!margins'] = { left: 0.3, right: 0.3, top: 0.45, bottom: 0.45, header: 0.2, footer: 0.2 };
-            ws['!autofilter'] = { ref: 'A3:I' + Math.max(rowCount, 3) };
-            ws['!freeze'] = { xSplit: 0, ySplit: 3, topLeftCell: 'A4', activePane: 'bottomLeft', state: 'frozen' };
+            ws['!autofilter'] = { ref: answerOnly ? ('A2:' + lastColLetter + Math.max(rowCount, 2)) : ('A3:' + lastColLetter + Math.max(rowCount, 3)) };
+            ws['!freeze'] = answerOnly
+                ? { xSplit: 0, ySplit: 2, topLeftCell: 'A3', activePane: 'bottomLeft', state: 'frozen' }
+                : { xSplit: 0, ySplit: 3, topLeftCell: 'A4', activePane: 'bottomLeft', state: 'frozen' };
 
             const baseBorder = answerExcelThinBorder('1F2937');
             const styleTitle = {
@@ -8337,7 +8541,7 @@ ${getPlainTextForAI(opt)}`;
                     const cellText = String(ws[addr].v || '').trim();
                     if (r === 0) ws[addr].s = styleTitle;
                     else if (r === 1) ws[addr].s = styleMainHeader;
-                    else if (r === 2) ws[addr].s = (c >= 4 && c <= 7) ? styleSubHeader : styleMainHeader;
+                    else if (!answerOnly && r === 2) ws[addr].s = (c >= 4 && c <= 7) ? styleSubHeader : styleMainHeader;
                     else if (c <= 2) ws[addr].s = styleCenterBody;
                     else if (c === 3) ws[addr].s = styleAnswerBody;
                     else if (c >= 4 && c <= 6) ws[addr].s = styleVocabBody;
@@ -8358,31 +8562,32 @@ ${getPlainTextForAI(opt)}`;
                 }
             });
 
-            // Chỉ giữ đúng phạm vi bảng A:I. Mọi ô/cột phát sinh ngoài I bị xóa sạch khỏi worksheet.
+            // Chỉ giữ đúng phạm vi bảng đang xuất. Mọi ô/cột phát sinh ngoài phạm vi sẽ bị xóa sạch khỏi worksheet.
             Object.keys(ws).forEach(key => {
                 if (!/^[A-Z]+[0-9]+$/.test(key)) return;
                 const decoded = XLSX.utils.decode_cell(key);
-                if (decoded.c > 8 || decoded.r >= rowCount) {
+                if (decoded.c > colCount - 1 || decoded.r >= rowCount) {
                     delete ws[key];
                 }
             });
         }
 
-        function downloadAnswerExplanationExcel(filename) {
+        function downloadAnswerExplanationExcel(filename, exportOptions = {}) {
             const safeFilename = (filename || 'De_Thi').trim() || 'De_Thi';
+            const answerOnly = isAnswerOnlyExportMode(exportOptions);
             if (window.XLSX && XLSX.utils && XLSX.writeFile) {
-                const sheetData = collectAnswerExplanationSheetData(safeFilename);
+                const sheetData = collectAnswerExplanationSheetData(safeFilename, exportOptions);
                 const ws = XLSX.utils.aoa_to_sheet(sheetData.aoa);
                 styleAnswerExplanationWorksheet(ws, sheetData);
                 const wb = XLSX.utils.book_new();
                 wb.Props = {
-                    Title: safeFilename + ' - Bảng đáp án + lời giải',
+                    Title: safeFilename + (answerOnly ? ' - Bảng đáp án' : ' - Bảng đáp án + lời giải'),
                     Subject: 'Bảng đáp án JLPT',
                     Author: 'JLPT Test Builder',
                     CreatedDate: new Date()
                 };
-                XLSX.utils.book_append_sheet(wb, ws, 'Bang_Dap_An_Loi_Giai');
-                XLSX.writeFile(wb, safeFilename + '_Bang_Dap_An_Loi_Giai.xlsx', {
+                XLSX.utils.book_append_sheet(wb, ws, answerOnly ? 'Bang_Dap_An' : 'Bang_Dap_An_Loi_Giai');
+                XLSX.writeFile(wb, safeFilename + (answerOnly ? '_Bang_Dap_An.xlsx' : '_Bang_Dap_An_Loi_Giai.xlsx'), {
                     bookType: 'xlsx',
                     cellStyles: true,
                     compression: true
@@ -8390,11 +8595,11 @@ ${getPlainTextForAI(opt)}`;
                 return;
             }
 
-            const html = buildAnswerExplanationExcelHtml(safeFilename);
+            const html = buildAnswerExplanationExcelHtml(safeFilename, exportOptions);
             const blob = new Blob(['\ufeff', html], { type: 'application/vnd.ms-excel;charset=utf-8' });
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
-            link.download = safeFilename + '_Bang_Dap_An_Loi_Giai.xls';
+            link.download = safeFilename + (answerOnly ? '_Bang_Dap_An.xls' : '_Bang_Dap_An_Loi_Giai.xls');
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -8497,7 +8702,7 @@ ${getPlainTextForAI(opt)}`;
             return result;
         }
 
-        function generateHtmlForPrintOrExport(isAnswerKey, addPartTitles = false, forWordDoc = true, includeAnswerExplanationTable = false) {
+        function generateHtmlForPrintOrExport(isAnswerKey, addPartTitles = false, forWordDoc = true, includeAnswerExplanationTable = false, exportOptions = {}) {
             let html = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns:v='urn:schemas-microsoft-com:vml' xmlns='http://www.w3.org/TR/REC-html40'>";
             html += "<head><meta charset='utf-8'><style>";
             html += "v\\:* { behavior:url(#default#VML); } ";
@@ -8618,8 +8823,9 @@ ${getPlainTextForAI(opt)}`;
 
                         let hasExplanation = cleanExp.trim() !== "";
                         let hasNote = cleanNote.trim() !== "";
+                        const includeExplanationForThisSection = shouldExportExplanationForSection(sIdx, exportOptions);
 
-                        if (isAnswerKey && (hasExplanation || hasNote)) {
+                        if (isAnswerKey && includeExplanationForThisSection && (hasExplanation || hasNote)) {
                             let combinedText = "<br>";
 
                             if (hasExplanation) {
@@ -8638,7 +8844,7 @@ ${getPlainTextForAI(opt)}`;
             });
 
             if (includeAnswerExplanationTable) {
-                html += buildAnswerExplanationTableHtml(filename);
+                html += buildAnswerExplanationTableHtml(filename, exportOptions);
             }
 
             html += "</body></html>"; return html;
@@ -8655,6 +8861,7 @@ ${getPlainTextForAI(opt)}`;
         }
 
         function executeExport(type) {
+            const exportOptions = getExportExplanationOptionsFromModal();
             deepCleanCurrentExamData();
             forceAutoSave(); closeModals();
             let printWindow = null;
@@ -8695,7 +8902,7 @@ ${getPlainTextForAI(opt)}`;
                     }
 
                     if (exportExcel) {
-                        setTimeout(() => downloadAnswerExplanationExcel(filename), exportWord ? 250 : 0);
+                        setTimeout(() => downloadAnswerExplanationExcel(filename, exportOptions), exportWord ? 250 : 0);
                     }
                 }
                 else if (type === 'teacher') {
@@ -8703,7 +8910,7 @@ ${getPlainTextForAI(opt)}`;
                     // không thêm nhãn 文字・語彙 / 文法 / 読解 / 聴解; đáp án đúng tô đỏ trong lựa chọn A/B/C/D,
                     // chỉ ghi lời giải bên dưới câu hỏi.
                     window.__wordPassageImageMap = null;
-                    const blob = htmlDocx.asBlob(generateHtmlForPrintOrExport(true, true, true));
+                    const blob = htmlDocx.asBlob(generateHtmlForPrintOrExport(true, true, true, false, exportOptions));
                     const link = document.createElement('a'); 
                     link.href = URL.createObjectURL(blob); 
                     link.download = filename + "_Huong_Dan_Giai.docx";
