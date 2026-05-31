@@ -3545,27 +3545,26 @@ ${getPlainTextForAI(opt)}`;
 
         // ==========================================
         // CLOUD SYNC: share link để nhiều tài khoản/máy cùng xem & sửa 1 đề
-        // Dùng Firebase Realtime Database vì đề có thể chứa đoạn đọc + ảnh base64 lớn hơn giới hạn Firestore 1MB.
-        // Lưu ý: Firebase web config là config công khai của app, KHÔNG phải Gemini API key.
-        // Không dán Gemini API key vào đây. Gemini key vẫn lưu riêng ở localStorage của từng người.
-        //
-        // Cách bật nhanh:
-        // 1) Tạo Firebase project -> Realtime Database -> Start in test mode hoặc set rules theo hướng dẫn.
-        // 2) Copy web config, thay các giá trị PASTE_... bên dưới rồi upload lại GitHub.
-        // 3) Mở app -> bấm "☁️ Tạo/Bật link" -> copy link gửi bạn bè.
+        // - Firebase config không hard-code trong GitHub: nhập ở nút ⚙️ Firebase và lưu localStorage từng máy.
+        // - Đề trên Firebase được mã hóa bằng mật khẩu mở đề để giảm nguy cơ bị đọc/trộm đề khi lộ link/database.
+        // - Có 3 lớp khóa: mật khẩu mở đề, mật khẩu chỉnh sửa, mật khẩu quản trị để đổi khóa.
+        // - Đây vẫn là web tĩnh phía client: muốn khóa tuyệt đối cấp database cần thêm Firebase Auth/Security Rules/Cloud Functions.
         // ==========================================
         const CLOUD_SYNC_FIREBASE_CONFIG = {
-            apiKey: "PASTE_FIREBASE_WEB_API_KEY_HERE",
-            authDomain: "PASTE_PROJECT_ID.firebaseapp.com",
-            databaseURL: "https://PASTE_PROJECT_ID-default-rtdb.firebaseio.com",
-            projectId: "PASTE_PROJECT_ID",
-            storageBucket: "PASTE_PROJECT_ID.appspot.com",
-            messagingSenderId: "PASTE_SENDER_ID",
-            appId: "PASTE_APP_ID"
+            apiKey: "",
+            authDomain: "",
+            databaseURL: "",
+            projectId: "",
+            storageBucket: "",
+            messagingSenderId: "",
+            appId: ""
         };
         const CLOUD_SYNC_LOCAL_CONFIG_KEY = 'jlpt_cloud_firebase_config_v1';
         const CLOUD_SYNC_LAST_EXAM_KEY = 'jlpt_cloud_last_exam_id_v1';
+        const CLOUD_SYNC_PASSWORD_CACHE_PREFIX = 'jlpt_cloud_edit_hash_';
+        const CLOUD_SYNC_ADMIN_CACHE_PREFIX = 'jlpt_cloud_admin_hash_';
         const CLOUD_SYNC_PATH = 'sharedExams';
+        const CLOUD_SECURITY_VERSION = 3;
         const cloudClientId = (() => {
             const key = 'jlpt_cloud_client_id_v1';
             let id = localStorage.getItem(key);
@@ -3583,6 +3582,13 @@ ${getPlainTextForAI(opt)}`;
         let cloudSaveTimeout = null;
         let cloudLastLocalWriteAt = 0;
         let cloudLastRemoteTimestamp = 0;
+        let cloudRoomSecurity = null;
+        let cloudEditHash = '';
+        let cloudAdminHash = '';
+        let cloudViewPassword = '';
+        let cloudReadOnlyMode = false;
+        let cloudLastEncryptedPayloadSig = '';
+        let cloudRoomIsEncrypted = false;
 
         function cloudLooksLikePlaceholder(value) {
             return !value || /PASTE_|YOUR_|project-id|PROJECT_ID/i.test(String(value));
@@ -3594,6 +3600,29 @@ ${getPlainTextForAI(opt)}`;
                 && !cloudLooksLikePlaceholder(cfg.apiKey)
                 && !cloudLooksLikePlaceholder(cfg.databaseURL)
                 && !cloudLooksLikePlaceholder(cfg.projectId);
+        }
+
+        function cloudParseFirebaseConfigText(text) {
+            let raw = String(text || '').trim();
+            if (!raw) return null;
+
+            const equalIndex = raw.indexOf('=');
+            const firstBrace = raw.indexOf('{');
+            const lastBrace = raw.lastIndexOf('}');
+            if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+                raw = raw.slice(firstBrace, lastBrace + 1);
+            } else if (equalIndex !== -1) {
+                raw = raw.slice(equalIndex + 1).replace(/;\s*$/, '').trim();
+            }
+
+            raw = raw
+                .replace(/\/\/.*$/gm, '')
+                .replace(/\/\*[\s\S]*?\*\//g, '')
+                .replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g, '$1"$2":')
+                .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, '"$1"')
+                .replace(/,\s*}/g, '}');
+
+            return JSON.parse(raw);
         }
 
         function getCloudFirebaseConfig() {
@@ -3613,20 +3642,392 @@ ${getPlainTextForAI(opt)}`;
             }
             const titleStatus = document.getElementById('exam-title-save-status');
             if (titleStatus) {
-                if (type === 'online') titleStatus.textContent = 'Đã lưu cloud';
+                if (type === 'online') titleStatus.textContent = cloudCanWriteToCurrentRoom() ? 'Đã lưu cloud' : 'Cloud chỉ xem';
                 else if (type === 'saving') titleStatus.textContent = 'Đang lưu...';
                 else if (type === 'error') titleStatus.textContent = 'Lỗi cloud';
                 else titleStatus.textContent = 'Đã lưu máy';
             }
         }
 
+        function cloudRequiredEditHash() {
+            return String((cloudRoomSecurity && cloudRoomSecurity.editHash) || '');
+        }
+
+        function cloudRequiredAdminHash() {
+            return String((cloudRoomSecurity && cloudRoomSecurity.adminHash) || '');
+        }
+
+        function cloudSecurityRevision() {
+            return String((cloudRoomSecurity && cloudRoomSecurity.revision) || '1');
+        }
+
+        function cloudCacheKey(prefix, roomId = cloudShareId) {
+            if (!roomId) return '';
+            return prefix + roomId + '_rev_' + cloudSecurityRevision();
+        }
+
+        function cloudCanWriteToCurrentRoom() {
+            const requiredHash = cloudRequiredEditHash();
+            return Boolean(cloudShareId && requiredHash && cloudEditHash && cloudEditHash === requiredHash && !(cloudRoomSecurity && cloudRoomSecurity.editLocked));
+        }
+
+        function cloudCanAdminCurrentRoom() {
+            const requiredHash = cloudRequiredAdminHash();
+            return Boolean(cloudShareId && requiredHash && cloudAdminHash && cloudAdminHash === requiredHash);
+        }
+
+        function cloudGetCachedEditHash(roomId = cloudShareId) {
+            if (!roomId) return '';
+            return localStorage.getItem(cloudCacheKey(CLOUD_SYNC_PASSWORD_CACHE_PREFIX, roomId)) || '';
+        }
+
+        function cloudSetCachedEditHash(roomId, hash) {
+            if (!roomId || !hash) return;
+            localStorage.setItem(cloudCacheKey(CLOUD_SYNC_PASSWORD_CACHE_PREFIX, roomId), hash);
+        }
+
+        function cloudGetCachedAdminHash(roomId = cloudShareId) {
+            if (!roomId) return '';
+            return localStorage.getItem(cloudCacheKey(CLOUD_SYNC_ADMIN_CACHE_PREFIX, roomId)) || '';
+        }
+
+        function cloudSetCachedAdminHash(roomId, hash) {
+            if (!roomId || !hash) return;
+            localStorage.setItem(cloudCacheKey(CLOUD_SYNC_ADMIN_CACHE_PREFIX, roomId), hash);
+        }
+
+        function cloudClearCachedEditHash(roomId = cloudShareId) {
+            if (!roomId) return;
+            Object.keys(localStorage).forEach(k => {
+                if (k.startsWith(CLOUD_SYNC_PASSWORD_CACHE_PREFIX + roomId)) localStorage.removeItem(k);
+                if (k.startsWith(CLOUD_SYNC_ADMIN_CACHE_PREFIX + roomId)) localStorage.removeItem(k);
+            });
+            if (roomId === cloudShareId) {
+                cloudEditHash = '';
+                cloudAdminHash = '';
+                cloudReadOnlyMode = Boolean(cloudRequiredEditHash());
+                updateCloudSyncUI();
+            }
+        }
+
+        function cloudValidatePlainPassword(pw, label = 'Mật khẩu') {
+            const pass = String(pw || '');
+            if (pass.length < 6) {
+                alert(label + ' nên có ít nhất 6 ký tự để khó đoán hơn nhé.');
+                return false;
+            }
+            if (/^\d+$/.test(pass) || /^(123456|abcdef|password|matkhau|111111)$/i.test(pass)) {
+                alert(label + ' quá dễ đoán. Hãy dùng chữ + số hoặc ký tự đặc biệt nhé.');
+                return false;
+            }
+            return true;
+        }
+
+        function cloudRandomHex(byteLength = 16) {
+            const arr = new Uint8Array(byteLength);
+            if (window.crypto && crypto.getRandomValues) crypto.getRandomValues(arr);
+            else for (let i = 0; i < arr.length; i++) arr[i] = Math.floor(Math.random() * 256);
+            return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        function cloudBytesToHex(bytes) {
+            return Array.from(new Uint8Array(bytes)).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        function cloudBytesToBase64(bytes) {
+            const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+            let binary = '';
+            const chunk = 0x8000;
+            for (let i = 0; i < arr.length; i += chunk) {
+                binary += String.fromCharCode.apply(null, arr.subarray(i, i + chunk));
+            }
+            return btoa(binary);
+        }
+
+        function cloudBase64ToBytes(base64) {
+            const binary = atob(String(base64 || ''));
+            const arr = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
+            return arr;
+        }
+
+        async function cloudHashPassword(password, purpose = 'edit', salt = '') {
+            const text = 'jlpt-cloud-password-v3::' + purpose + '::' + String(password || '');
+            const saltText = 'salt::' + purpose + '::' + String(salt || '');
+            if (window.crypto && crypto.subtle && window.TextEncoder) {
+                const material = await crypto.subtle.importKey('raw', new TextEncoder().encode(text), 'PBKDF2', false, ['deriveBits']);
+                const bits = await crypto.subtle.deriveBits({
+                    name: 'PBKDF2',
+                    hash: 'SHA-256',
+                    salt: new TextEncoder().encode(saltText),
+                    iterations: 120000
+                }, material, 256);
+                return cloudBytesToHex(bits);
+            }
+
+            let h1 = 0x811c9dc5;
+            const fallbackText = text + '::' + saltText;
+            for (let i = 0; i < fallbackText.length; i++) {
+                h1 ^= fallbackText.charCodeAt(i);
+                h1 = Math.imul(h1, 16777619);
+            }
+            return 'fallback_' + (h1 >>> 0).toString(16).padStart(8, '0');
+        }
+
+        async function cloudDeriveAesKey(password, salt) {
+            if (!window.crypto || !crypto.subtle || !window.TextEncoder) {
+                throw new Error('Trình duyệt không hỗ trợ WebCrypto nên không thể mã hóa/giải mã đề. Hãy mở bằng HTTPS/GitHub Pages trên Chrome/Edge/Safari mới.');
+            }
+            const material = await crypto.subtle.importKey(
+                'raw',
+                new TextEncoder().encode('jlpt-cloud-payload-v3::' + String(password || '')),
+                'PBKDF2',
+                false,
+                ['deriveKey']
+            );
+            return crypto.subtle.deriveKey({
+                name: 'PBKDF2',
+                hash: 'SHA-256',
+                salt: new TextEncoder().encode('payload-salt::' + String(salt || '')),
+                iterations: 180000
+            }, material, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+        }
+
+        async function cloudEncryptSnapshotPayload(examData) {
+            if (!cloudViewPassword) throw new Error('Thiếu mật khẩu mở đề để mã hóa dữ liệu.');
+            const salt = cloudRoomSecurity && cloudRoomSecurity.viewSalt;
+            if (!salt) throw new Error('Thiếu viewSalt của đề cloud.');
+            const key = await cloudDeriveAesKey(cloudViewPassword, salt);
+            const iv = new Uint8Array(12);
+            crypto.getRandomValues(iv);
+            const cleanPayload = JSON.parse(JSON.stringify(examData || buildCurrentExamSnapshot()));
+            delete cleanPayload._security;
+            delete cleanPayload._payloadEncrypted;
+            const encoded = new TextEncoder().encode(JSON.stringify(cleanPayload));
+            const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
+            return {
+                v: 1,
+                alg: 'AES-GCM-256/PBKDF2-SHA256',
+                iv: cloudBytesToBase64(iv),
+                data: cloudBytesToBase64(cipher)
+            };
+        }
+
+        async function cloudDecryptSnapshotPayload(encrypted, password, security) {
+            if (!encrypted || !encrypted.data || !encrypted.iv) throw new Error('Dữ liệu đề đã khóa không hợp lệ.');
+            const salt = security && security.viewSalt;
+            if (!salt) throw new Error('Đề đã khóa nhưng thiếu viewSalt.');
+            const key = await cloudDeriveAesKey(password, salt);
+            const plainBytes = await crypto.subtle.decrypt({
+                name: 'AES-GCM',
+                iv: cloudBase64ToBytes(encrypted.iv)
+            }, key, cloudBase64ToBytes(encrypted.data));
+            return JSON.parse(new TextDecoder().decode(plainBytes));
+        }
+
+        async function cloudPromptCreateSecurity(roomId = cloudShareId) {
+            const viewPass = prompt('Tạo MẬT KHẨU MỞ ĐỀ.\n\nKhông có mật khẩu này thì người khác không đọc được nội dung đề trên Firebase. Không dùng mật khẩu cá nhân quan trọng nhé:');
+            if (viewPass === null) return false;
+            if (!cloudValidatePlainPassword(viewPass, 'Mật khẩu mở đề')) return false;
+
+            let editPass = prompt('Tạo MẬT KHẨU CHỈNH SỬA.\n\nAi có mật khẩu này mới tự lưu/đẩy thay đổi lên cloud. Để trống = dùng giống mật khẩu mở đề:');
+            if (editPass === null) return false;
+            if (!editPass) editPass = viewPass;
+            if (!cloudValidatePlainPassword(editPass, 'Mật khẩu chỉnh sửa')) return false;
+
+            let adminPass = prompt('Tạo MẬT KHẨU QUẢN TRỊ.\n\nDùng để đổi mật khẩu mở đề/chỉnh sửa/quản trị sau này. Để trống = dùng giống mật khẩu chỉnh sửa:');
+            if (adminPass === null) return false;
+            if (!adminPass) adminPass = editPass;
+            if (!cloudValidatePlainPassword(adminPass, 'Mật khẩu quản trị')) return false;
+
+            const confirmPass = prompt('Nhập lại MẬT KHẨU MỞ ĐỀ để xác nhận:');
+            if (confirmPass === null) return false;
+            if (confirmPass !== viewPass) {
+                alert('Mật khẩu mở đề xác nhận không khớp.');
+                return false;
+            }
+
+            const viewSalt = cloudRandomHex(16);
+            const editSalt = cloudRandomHex(16);
+            const adminSalt = cloudRandomHex(16);
+            const viewHash = await cloudHashPassword(viewPass, 'view', viewSalt);
+            const editHash = await cloudHashPassword(editPass, 'edit', editSalt);
+            const adminHash = await cloudHashPassword(adminPass, 'admin', adminSalt);
+
+            cloudViewPassword = viewPass;
+            cloudEditHash = editHash;
+            cloudAdminHash = adminHash;
+            cloudRoomSecurity = {
+                version: CLOUD_SECURITY_VERSION,
+                encrypted: true,
+                viewSalt,
+                viewHash,
+                editSalt,
+                editHash,
+                adminSalt,
+                adminHash,
+                editLocked: false,
+                revision: Date.now(),
+                createdAt: Date.now(),
+                updatedAt: Date.now()
+            };
+            cloudRoomIsEncrypted = true;
+            cloudReadOnlyMode = false;
+            cloudSetCachedEditHash(roomId, editHash);
+            cloudSetCachedAdminHash(roomId, adminHash);
+            updateCloudSyncUI();
+            return true;
+        }
+
+        async function cloudEnsureViewUnlocked(remoteVal = null, roomId = cloudShareId) {
+            const val = remoteVal || {};
+            const security = val._security || cloudRoomSecurity || null;
+            const encryptedPayload = val._payloadEncrypted || null;
+            if (!encryptedPayload) return true;
+            if (!security || !security.viewHash || !security.viewSalt) {
+                cloudSetStatus('Đề này đã khóa nhưng thiếu thông tin bảo mật để mở.', 'error');
+                return false;
+            }
+
+            if (cloudViewPassword) {
+                try {
+                    const hash = await cloudHashPassword(cloudViewPassword, 'view', security.viewSalt);
+                    if (hash === security.viewHash) return true;
+                } catch (_) {}
+                cloudViewPassword = '';
+            }
+
+            const pw = prompt('Đề cloud này đã khóa để chống trộm đề.\n\nNhập MẬT KHẨU MỞ ĐỀ để xem nội dung:');
+            if (pw === null) {
+                cloudSetStatus('🔐 Đề đang được mã hóa. Cần mật khẩu mở đề để xem nội dung.', 'error');
+                updateCloudSyncUI();
+                return false;
+            }
+            const hash = await cloudHashPassword(pw, 'view', security.viewSalt);
+            if (hash !== security.viewHash) {
+                cloudSetStatus('🔐 Sai mật khẩu mở đề. Nội dung đề không được tải xuống.', 'error');
+                updateCloudSyncUI();
+                return false;
+            }
+            cloudViewPassword = pw;
+            cloudSetStatus('🔐 Đã mở khóa xem đề. Dữ liệu cloud sẽ được giải mã trong trình duyệt này.', 'online');
+            return true;
+        }
+
+        async function unlockCloudEditing() {
+            if (!cloudShareId) {
+                alert('Chưa mở đề cloud nào. Bấm “☁️ Tạo/Bật link” hoặc “📥 Mở link/mã” trước nhé.');
+                return false;
+            }
+
+            if (cloudRoomSecurity && cloudRoomSecurity.editLocked) {
+                cloudReadOnlyMode = true;
+                cloudSetStatus('🔒 Chủ đề đang khóa chỉnh sửa. Cần quản trị mở khóa trước.', 'error');
+                updateCloudSyncUI();
+                return false;
+            }
+
+            const requiredHash = cloudRequiredEditHash();
+            if (!requiredHash) {
+                alert('Đề cloud này chưa có mật khẩu chỉnh sửa. Hãy bấm “🛡️ Quản lý khóa” để nâng cấp khóa đề.');
+                return false;
+            }
+
+            if (cloudEditHash && cloudEditHash === requiredHash) {
+                cloudReadOnlyMode = false;
+                cloudSetStatus('🔓 Đã mở khóa chỉnh sửa cloud trên trình duyệt này.', 'online');
+                updateCloudSyncUI();
+                return true;
+            }
+
+            const cached = cloudGetCachedEditHash(cloudShareId);
+            if (cached && cached === requiredHash) {
+                cloudEditHash = cached;
+                cloudReadOnlyMode = false;
+                cloudSetStatus('🔓 Đã dùng mật khẩu sửa đã lưu trong trình duyệt này để mở khóa chỉnh sửa cloud.', 'online');
+                updateCloudSyncUI();
+                return true;
+            }
+
+            const pw = prompt('Nhập MẬT KHẨU CHỈNH SỬA của đề cloud này:');
+            if (pw === null) return false;
+            const hash = await cloudHashPassword(pw, 'edit', cloudRoomSecurity.editSalt || '');
+            if (hash !== requiredHash) {
+                cloudReadOnlyMode = true;
+                cloudSetStatus('🔒 Sai mật khẩu chỉnh sửa. Cậu vẫn xem/nhận cập nhật cloud được, nhưng thay đổi sẽ không lưu lên cloud.', 'error');
+                updateCloudSyncUI();
+                return false;
+            }
+
+            cloudEditHash = hash;
+            cloudReadOnlyMode = false;
+            cloudSetCachedEditHash(cloudShareId, hash);
+            cloudSetStatus('🔓 Đã mở khóa chỉnh sửa cloud. Từ giờ thay đổi sẽ tự lưu lên cloud.', 'online');
+            updateCloudSyncUI();
+            return true;
+        }
+
+        async function cloudUnlockAdmin() {
+            if (!cloudShareId) {
+                alert('Chưa mở đề cloud nào.');
+                return false;
+            }
+            const requiredHash = cloudRequiredAdminHash();
+            if (!requiredHash || !cloudRoomSecurity || !cloudRoomSecurity.adminSalt) {
+                alert('Đề này chưa có mật khẩu quản trị. Hãy tạo link cloud mới để dùng hệ khóa mới.');
+                return false;
+            }
+            if (cloudAdminHash && cloudAdminHash === requiredHash) return true;
+            const cached = cloudGetCachedAdminHash(cloudShareId);
+            if (cached && cached === requiredHash) {
+                cloudAdminHash = cached;
+                return true;
+            }
+            const pw = prompt('Nhập MẬT KHẨU QUẢN TRỊ để đổi/cập nhật khóa đề:');
+            if (pw === null) return false;
+            const hash = await cloudHashPassword(pw, 'admin', cloudRoomSecurity.adminSalt || '');
+            if (hash !== requiredHash) {
+                alert('Sai mật khẩu quản trị.');
+                return false;
+            }
+            cloudAdminHash = hash;
+            cloudSetCachedAdminHash(cloudShareId, hash);
+            return true;
+        }
+
+        function cloudApplySecurityFromRemote(val, roomId) {
+            const sec = val && val._security && typeof val._security === 'object' ? val._security : null;
+            cloudRoomSecurity = sec || null;
+            cloudRoomIsEncrypted = Boolean(val && val._payloadEncrypted && sec && sec.encrypted);
+            const requiredEdit = cloudRequiredEditHash();
+            const requiredAdmin = cloudRequiredAdminHash();
+
+            if (requiredEdit && (!cloudEditHash || cloudEditHash !== requiredEdit)) {
+                const cached = cloudGetCachedEditHash(roomId);
+                cloudEditHash = cached && cached === requiredEdit ? cached : '';
+            }
+            if (requiredAdmin && (!cloudAdminHash || cloudAdminHash !== requiredAdmin)) {
+                const cachedAdmin = cloudGetCachedAdminHash(roomId);
+                cloudAdminHash = cachedAdmin && cachedAdmin === requiredAdmin ? cachedAdmin : '';
+            }
+            cloudReadOnlyMode = !cloudCanWriteToCurrentRoom();
+        }
+
         function updateCloudSyncUI() {
             const shareEl = document.getElementById('cloud-share-id');
             if (shareEl) {
                 if (cloudShareId) {
-                    shareEl.innerHTML = `<b>Mã đề:</b> ${escapeHtml(cloudShareId)}<br><b>Link:</b> ${escapeHtml(makeCloudShareUrl(cloudShareId))}`;
+                    const lockState = cloudCanWriteToCurrentRoom()
+                        ? '🔓 Đã mở khóa sửa cloud'
+                        : (cloudRoomSecurity && cloudRoomSecurity.editLocked ? '⛔ Đang khóa chỉnh sửa' : '🔒 Thiếu mật khẩu sửa / chỉ xem cloud');
+                    const encState = cloudRoomIsEncrypted || (cloudRoomSecurity && cloudRoomSecurity.encrypted)
+                        ? (cloudViewPassword ? '🔐 Đề đã mã hóa, máy này đã mở xem' : '🔐 Đề đã mã hóa, cần mật khẩu mở đề')
+                        : '⚠️ Đề cloud cũ/chưa mã hóa';
+                    const adminState = cloudCanAdminCurrentRoom() ? '🛡️ Đã mở quản trị' : '🛡️ Chưa mở quản trị';
+                    shareEl.innerHTML = `<b>Mã đề:</b> ${escapeHtml(cloudShareId)}<br><b>Link:</b> ${escapeHtml(makeCloudShareUrl(cloudShareId))}<br><b>Bảo vệ:</b> ${escapeHtml(encState)}<br><b>Chỉnh sửa:</b> ${escapeHtml(lockState)}<br><b>Quản trị:</b> ${escapeHtml(adminState)}`;
                 } else {
-                    shareEl.textContent = 'Link đề chung: chưa có';
+                    const hasCfg = cloudFirebaseConfigLooksValid(getCloudFirebaseConfig());
+                    shareEl.textContent = hasCfg ? 'Firebase config đã có trong trình duyệt này. Link đề chung: chưa có' : 'Chưa có Firebase config. Bấm ⚙️ Firebase để dán config trước.';
                 }
             }
         }
@@ -3670,7 +4071,7 @@ ${getPlainTextForAI(opt)}`;
         function ensureCloudFirebaseReady() {
             const cfg = getCloudFirebaseConfig();
             if (!cfg) {
-                cloudSetStatus('Chưa có Firebase config. Bấm ⚙️ Firebase để dán config, hoặc thay CLOUD_SYNC_FIREBASE_CONFIG trong code trước khi up GitHub.', 'error');
+                cloudSetStatus('Chưa có Firebase config. Bấm ⚙️ Firebase để dán config. File GitHub vẫn không cần lộ project Firebase.', 'error');
                 throw new Error('Missing Firebase config');
             }
             if (!window.firebase || !firebase.database) {
@@ -3713,20 +4114,97 @@ ${getPlainTextForAI(opt)}`;
             };
         }
 
+        async function normalizeCloudExamSnapshotSecure(raw, idFallback = '') {
+            const val = raw || {};
+            if (val._payloadEncrypted) {
+                const ok = await cloudEnsureViewUnlocked(val, idFallback);
+                if (!ok) return null;
+                const decrypted = await cloudDecryptSnapshotPayload(val._payloadEncrypted, cloudViewPassword, val._security || cloudRoomSecurity);
+                decrypted.id = cloudSanitizeExamId(decrypted.id || val.id || idFallback || currentExamId || generateId());
+                decrypted.filename = String(decrypted.filename || val.filename || 'De_Thi_Da_Khoa');
+                decrypted.date = decrypted.date || val.date || new Date().toLocaleString('vi-VN');
+                decrypted.timestamp_ms = Number(decrypted.timestamp_ms || val.timestamp_ms || Date.now());
+                decrypted.data = migrateDataToV8(Array.isArray(decrypted.data) ? JSON.parse(JSON.stringify(decrypted.data)) : []);
+                decrypted.mergedSources = Array.isArray(decrypted.mergedSources) ? decrypted.mergedSources : [];
+                cloudLastEncryptedPayloadSig = String(val._payloadEncrypted.data || '').slice(0, 80) + String(val._payloadEncrypted.iv || '');
+                return decrypted;
+            }
+            return normalizeCloudExamSnapshot(val, idFallback);
+        }
+
         async function pushSnapshotToCloud(examData, reason = 'auto') {
             if (!cloudRef || cloudApplyingRemote) return;
-            const payload = JSON.parse(JSON.stringify(examData || buildCurrentExamSnapshot()));
-            payload.id = cloudShareId || payload.id || currentExamId || generateId();
-            payload.updatedBy = cloudClientId;
-            payload.updatedAt = firebase.database.ServerValue.TIMESTAMP;
-            payload.timestamp_ms = Date.now();
-            payload.date = new Date().toLocaleString('vi-VN');
+
+            if (cloudRoomSecurity && cloudRoomSecurity.editLocked) {
+                cloudReadOnlyMode = true;
+                cloudSetStatus('⛔ Cloud đang khóa chỉnh sửa. Bấm “🛡️ Quản lý khóa” bằng mật khẩu quản trị để mở khóa.', 'error');
+                updateCloudSyncUI();
+                return;
+            }
+
+            const requiredHash = cloudRequiredEditHash();
+            if (requiredHash && (!cloudEditHash || cloudEditHash !== requiredHash)) {
+                cloudReadOnlyMode = true;
+                updateCloudSyncUI();
+                if (reason === 'manual') await unlockCloudEditing();
+                if (!cloudCanWriteToCurrentRoom()) {
+                    cloudSetStatus('🔒 Chưa có mật khẩu sửa đúng nên không đẩy thay đổi lên cloud.', 'error');
+                    return;
+                }
+            }
+
+            if (!cloudRoomSecurity || !cloudRoomSecurity.encrypted) {
+                if (reason !== 'manual') {
+                    cloudReadOnlyMode = true;
+                    cloudSetStatus('🔐 Cloud room cần nâng cấp khóa. Bấm “💾 Đẩy lên cloud” hoặc “🛡️ Quản lý khóa” để tạo mật khẩu.', 'error');
+                    updateCloudSyncUI();
+                    return;
+                }
+                const created = await cloudPromptCreateSecurity(cloudShareId);
+                if (!created) {
+                    cloudSetStatus('Đã hủy đẩy cloud vì chưa tạo đủ mật khẩu bảo vệ.', 'error');
+                    return;
+                }
+            }
+
+            if (!cloudViewPassword) {
+                const fakeRemote = { _security: cloudRoomSecurity, _payloadEncrypted: { data: 'pending', iv: 'pending' } };
+                const ok = await cloudEnsureViewUnlocked(fakeRemote, cloudShareId);
+                if (!ok) return;
+            }
+
+            const snapshot = JSON.parse(JSON.stringify(examData || buildCurrentExamSnapshot()));
+            snapshot.id = cloudShareId || snapshot.id || currentExamId || generateId();
+            snapshot.timestamp_ms = Date.now();
+            snapshot.date = new Date().toLocaleString('vi-VN');
+
+            const encryptedPayload = await cloudEncryptSnapshotPayload(snapshot);
+            const payload = {
+                id: snapshot.id,
+                filename: '🔐 Đề đã khóa',
+                date: snapshot.date,
+                timestamp_ms: snapshot.timestamp_ms,
+                updatedBy: cloudClientId,
+                updatedAt: firebase.database.ServerValue.TIMESTAMP,
+                _security: {
+                    ...cloudRoomSecurity,
+                    version: CLOUD_SECURITY_VERSION,
+                    encrypted: true,
+                    updatedAt: Date.now()
+                },
+                _payloadEncrypted: encryptedPayload
+            };
+            cloudRoomSecurity = payload._security;
+            cloudRoomIsEncrypted = true;
+            cloudReadOnlyMode = false;
+            cloudSetCachedEditHash(payload.id, cloudEditHash);
+            if (cloudAdminHash) cloudSetCachedAdminHash(payload.id, cloudAdminHash);
             cloudLastLocalWriteAt = Date.now();
-            cloudSetStatus(reason === 'manual' ? '☁️ Đang đẩy đề hiện tại lên cloud...' : '☁️ Đang tự lưu lên cloud...', 'saving');
+            cloudSetStatus(reason === 'manual' ? '☁️ Đang mã hóa & đẩy đề lên cloud...' : '☁️ Đang mã hóa & tự lưu lên cloud...', 'saving');
             try {
                 await cloudRef.set(payload);
                 localStorage.setItem(CLOUD_SYNC_LAST_EXAM_KEY, payload.id);
-                cloudSetStatus('✅ Đã lưu trên cloud. Người mở link sẽ thấy đề mới nhất.', 'online');
+                cloudSetStatus('✅ Đã lưu cloud bằng dữ liệu mã hóa. Người khác cần mật khẩu mở đề mới xem được.', 'online');
                 updateCloudSyncUI();
             } catch (err) {
                 console.error(err);
@@ -3736,6 +4214,12 @@ ${getPlainTextForAI(opt)}`;
 
         function cloudQueueSave(examData) {
             if (!cloudRef || !cloudShareId || cloudApplyingRemote) return;
+            if (!cloudCanWriteToCurrentRoom()) {
+                if (cloudRequiredEditHash()) {
+                    cloudSetStatus('🔒 Đang ở chế độ chỉ xem cloud. Thay đổi vẫn lưu trong máy này, nhưng không lên cloud cho đến khi nhập đúng mật khẩu sửa.', 'error');
+                }
+                return;
+            }
             if (cloudSaveTimeout) clearTimeout(cloudSaveTimeout);
             const snapshot = JSON.parse(JSON.stringify(examData || buildCurrentExamSnapshot()));
             cloudSaveTimeout = setTimeout(() => pushSnapshotToCloud(snapshot, 'auto'), 1200);
@@ -3749,6 +4233,18 @@ ${getPlainTextForAI(opt)}`;
             } catch (err) {
                 if (options.silent !== true) alert('Chưa bật được Cloud Sync: ' + (err.message || err));
                 return;
+            }
+
+            if (options.pushCurrent) {
+                const ok = await cloudPromptCreateSecurity(roomId);
+                if (!ok) {
+                    cloudSetStatus('Đã hủy tạo link cloud vì chưa tạo mật khẩu bảo vệ.', 'error');
+                    return;
+                }
+            } else {
+                cloudEditHash = '';
+                cloudAdminHash = '';
+                cloudViewPassword = '';
             }
 
             if (cloudRef) {
@@ -3767,17 +4263,22 @@ ${getPlainTextForAI(opt)}`;
                 await pushSnapshotToCloud({ ...buildCurrentExamSnapshot(), id: roomId }, 'manual');
             }
 
-            cloudRef.on('value', (snapshot) => {
+            cloudRef.on('value', async (snapshot) => {
                 const val = snapshot.val();
                 if (!val) {
+                    cloudReadOnlyMode = !cloudEditHash;
+                    updateCloudSyncUI();
                     cloudSetStatus('Cloud room này chưa có dữ liệu. Bấm “💾 Đẩy lên cloud” để tạo dữ liệu đầu tiên.', 'saving');
                     return;
                 }
 
+                cloudApplySecurityFromRemote(val, roomId);
+
                 const incomingUpdatedAt = Number(val.updatedAt || 0);
                 if (val.updatedBy === cloudClientId && Date.now() - cloudLastLocalWriteAt < 6000) {
                     cloudLastRemoteTimestamp = Math.max(cloudLastRemoteTimestamp, incomingUpdatedAt || Date.now());
-                    cloudSetStatus('✅ Đã lưu trên cloud. Người mở link sẽ thấy đề mới nhất.', 'online');
+                    cloudSetStatus('✅ Đã lưu cloud bằng dữ liệu mã hóa. Người khác cần mật khẩu mở đề mới xem được.', 'online');
+                    updateCloudSyncUI();
                     return;
                 }
                 if (incomingUpdatedAt && incomingUpdatedAt < cloudLastRemoteTimestamp) return;
@@ -3785,13 +4286,18 @@ ${getPlainTextForAI(opt)}`;
 
                 try {
                     cloudApplyingRemote = true;
-                    const examData = normalizeCloudExamSnapshot(val, roomId);
+                    const examData = await normalizeCloudExamSnapshotSecure(val, roomId);
+                    if (!examData) return;
                     loadExamData(examData);
-                    forceAutoSave(); // lưu thêm một bản dự phòng vào máy, không đẩy ngược vì cloudApplyingRemote=true
-                    cloudSetStatus(`✅ Đã nhận cập nhật cloud: ${examData.filename}`, 'online');
+                    forceAutoSave();
+                    if (cloudCanWriteToCurrentRoom()) {
+                        cloudSetStatus(`✅ Đã nhận & giải mã cập nhật cloud: ${examData.filename}\n🔓 Đã mở khóa sửa cloud trên trình duyệt này.`, 'online');
+                    } else {
+                        cloudSetStatus(`✅ Đã nhận & giải mã cập nhật cloud: ${examData.filename}\n🔒 Chế độ chỉ xem cloud. Bấm “🔑 Mật khẩu sửa” nếu muốn lưu thay đổi lên cloud.`, 'error');
+                    }
                 } catch (err) {
                     console.error(err);
-                    cloudSetStatus('Lỗi đọc dữ liệu cloud: ' + (err.message || err), 'error');
+                    cloudSetStatus('Lỗi đọc/giải mã dữ liệu cloud: ' + (err.message || err), 'error');
                 } finally {
                     cloudApplyingRemote = false;
                     updateCloudSyncUI();
@@ -3823,8 +4329,9 @@ ${getPlainTextForAI(opt)}`;
                 return;
             }
             const link = makeCloudShareUrl(id);
+            const doneMsg = 'Đã copy link đề chung. Gửi MẬT KHẨU MỞ ĐỀ riêng; chỉ gửi MẬT KHẨU SỬA cho người được phép chỉnh.';
             if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(link).then(() => showRTEToast('Đã copy link đề chung.')).catch(() => prompt('Copy link đề chung:', link));
+                navigator.clipboard.writeText(link).then(() => showRTEToast(doneMsg)).catch(() => prompt('Copy link đề chung:', link));
             } else {
                 prompt('Copy link đề chung:', link);
             }
@@ -3837,11 +4344,144 @@ ${getPlainTextForAI(opt)}`;
             startCloudRealtimeSync(roomId, { pushCurrent: false });
         }
 
+        async function manageCloudPasswords() {
+            if (!cloudShareId || !cloudRef) {
+                alert('Chưa mở đề cloud nào.');
+                return;
+            }
+
+            if (!cloudRoomSecurity || !cloudRoomSecurity.encrypted) {
+                const ok = confirm('Đề cloud này chưa dùng hệ khóa mới. Cậu muốn nâng cấp/mã hóa đề bằng mật khẩu bây giờ không?');
+                if (!ok) return;
+                const created = await cloudPromptCreateSecurity(cloudShareId);
+                if (!created) return;
+                await pushSnapshotToCloud({ ...buildCurrentExamSnapshot(), id: cloudShareId }, 'manual');
+                return;
+            }
+
+            const adminOk = await cloudUnlockAdmin();
+            if (!adminOk) return;
+
+            const choice = prompt(
+                'QUẢN LÝ KHÓA ĐỀ CLOUD\n\n' +
+                'Nhập số muốn làm:\n' +
+                '1 = Đổi mật khẩu MỞ ĐỀ + mã hóa lại dữ liệu\n' +
+                '2 = Đổi mật khẩu CHỈNH SỬA\n' +
+                '3 = Đổi mật khẩu QUẢN TRỊ\n' +
+                '4 = Bật/tắt khóa chỉnh sửa tạm thời\n' +
+                '5 = Xóa mật khẩu sửa/quản trị đã nhớ trên máy này\n' +
+                '6 = Tạo mã/link đề mới từ đề hiện tại',
+                '1'
+            );
+            if (choice === null) return;
+            const c = choice.trim();
+
+            if (c === '1') {
+                const newPass = prompt('Nhập MẬT KHẨU MỞ ĐỀ mới. Sau khi đổi, mật khẩu mở đề cũ sẽ không đọc được dữ liệu mới nữa:');
+                if (newPass === null) return;
+                if (!cloudValidatePlainPassword(newPass, 'Mật khẩu mở đề mới')) return;
+                const confirmPass = prompt('Nhập lại mật khẩu mở đề mới để xác nhận:');
+                if (confirmPass === null) return;
+                if (confirmPass !== newPass) return alert('Hai lần nhập không khớp.');
+                const newSalt = cloudRandomHex(16);
+                const newHash = await cloudHashPassword(newPass, 'view', newSalt);
+                cloudRoomSecurity = {
+                    ...cloudRoomSecurity,
+                    viewSalt: newSalt,
+                    viewHash: newHash,
+                    revision: Date.now(),
+                    updatedAt: Date.now()
+                };
+                cloudViewPassword = newPass;
+                await pushSnapshotToCloud({ ...buildCurrentExamSnapshot(), id: cloudShareId }, 'manual');
+                alert('Đã đổi mật khẩu mở đề và mã hóa lại dữ liệu.');
+                return;
+            }
+
+            if (c === '2') {
+                const newPass = prompt('Nhập MẬT KHẨU CHỈNH SỬA mới:');
+                if (newPass === null) return;
+                if (!cloudValidatePlainPassword(newPass, 'Mật khẩu chỉnh sửa mới')) return;
+                const newSalt = cloudRandomHex(16);
+                const newHash = await cloudHashPassword(newPass, 'edit', newSalt);
+                cloudRoomSecurity = {
+                    ...cloudRoomSecurity,
+                    editSalt: newSalt,
+                    editHash: newHash,
+                    revision: Date.now(),
+                    updatedAt: Date.now()
+                };
+                cloudEditHash = newHash;
+                cloudSetCachedEditHash(cloudShareId, newHash);
+                await pushSnapshotToCloud({ ...buildCurrentExamSnapshot(), id: cloudShareId }, 'manual');
+                alert('Đã đổi mật khẩu chỉnh sửa. Người đang dùng mật khẩu cũ sẽ bị chuyển sang chỉ xem khi nhận cập nhật mới.');
+                return;
+            }
+
+            if (c === '3') {
+                const newPass = prompt('Nhập MẬT KHẨU QUẢN TRỊ mới:');
+                if (newPass === null) return;
+                if (!cloudValidatePlainPassword(newPass, 'Mật khẩu quản trị mới')) return;
+                const newSalt = cloudRandomHex(16);
+                const newHash = await cloudHashPassword(newPass, 'admin', newSalt);
+                cloudRoomSecurity = {
+                    ...cloudRoomSecurity,
+                    adminSalt: newSalt,
+                    adminHash: newHash,
+                    revision: Date.now(),
+                    updatedAt: Date.now()
+                };
+                cloudAdminHash = newHash;
+                cloudSetCachedAdminHash(cloudShareId, newHash);
+                await pushSnapshotToCloud({ ...buildCurrentExamSnapshot(), id: cloudShareId }, 'manual');
+                alert('Đã đổi mật khẩu quản trị.');
+                return;
+            }
+
+            if (c === '4') {
+                cloudRoomSecurity = {
+                    ...cloudRoomSecurity,
+                    editLocked: !cloudRoomSecurity.editLocked,
+                    revision: Date.now(),
+                    updatedAt: Date.now()
+                };
+                await pushSnapshotToCloud({ ...buildCurrentExamSnapshot(), id: cloudShareId }, 'manual');
+                alert(cloudRoomSecurity.editLocked ? 'Đã khóa chỉnh sửa tạm thời. Người khác chỉ xem được.' : 'Đã mở lại chỉnh sửa bằng mật khẩu sửa.');
+                return;
+            }
+
+            if (c === '5') {
+                cloudClearCachedEditHash(cloudShareId);
+                alert('Đã xóa mật khẩu sửa/quản trị đã nhớ trong trình duyệt này. Mật khẩu mở đề trong phiên hiện tại vẫn còn đến khi tải lại trang.');
+                return;
+            }
+
+            if (c === '6') {
+                const ok = confirm('Tạo mã/link mới từ đề hiện tại? Link cũ sẽ không tự mất, nhưng cậu có thể ngừng gửi link cũ.');
+                if (!ok) return;
+                const newId = generateId();
+                const oldRef = cloudRef;
+                if (oldRef) {
+                    try { oldRef.off(); } catch (_) {}
+                }
+                cloudShareId = newId;
+                currentExamId = newId;
+                cloudReplaceUrlExamId(newId);
+                cloudRef = cloudDb.ref(`${CLOUD_SYNC_PATH}/${newId}`);
+                await cloudPromptCreateSecurity(newId);
+                await pushSnapshotToCloud({ ...buildCurrentExamSnapshot(), id: newId }, 'manual');
+                copyCloudShareLink();
+                return;
+            }
+
+            alert('Lựa chọn không hợp lệ.');
+        }
+
         function configureCloudFirebase() {
             const current = getCloudFirebaseConfig() || CLOUD_SYNC_FIREBASE_CONFIG;
             const sample = JSON.stringify(current, null, 2);
             const text = prompt(
-                'Dán Firebase Web Config dạng JSON.\n\nLưu ý: Đây là Firebase web config công khai, KHÔNG phải Gemini API key. Muốn mọi người dùng ngay sau khi mở link GitHub, hãy thay CLOUD_SYNC_FIREBASE_CONFIG trong code rồi up lại.\n\nConfig hiện tại:',
+                'Dán Firebase Web Config vào đây. Có thể dán cả đoạn const firebaseConfig = { ... }; do Firebase đưa.\n\nConfig này chỉ lưu trong trình duyệt này bằng localStorage, không ghi vào source GitHub. Nếu người khác mở link bằng máy khác, họ cũng cần nhập cùng Firebase config một lần.\n\nĐể trống rồi OK = xóa config đã lưu.\n\nConfig hiện tại:',
                 sample
             );
             if (text === null) return;
@@ -3849,17 +4489,20 @@ ${getPlainTextForAI(opt)}`;
             if (!trimmed) {
                 localStorage.removeItem(CLOUD_SYNC_LOCAL_CONFIG_KEY);
                 cloudApp = cloudDb = null;
+                stopCloudRealtimeSync(false);
                 cloudSetStatus('Đã xóa Firebase config trong trình duyệt này.', '');
+                updateCloudSyncUI();
                 return;
             }
             try {
-                const cfg = JSON.parse(trimmed);
+                const cfg = cloudParseFirebaseConfigText(trimmed);
                 if (!cloudFirebaseConfigLooksValid(cfg)) throw new Error('Config thiếu apiKey / databaseURL / projectId hoặc vẫn còn PASTE_...');
                 localStorage.setItem(CLOUD_SYNC_LOCAL_CONFIG_KEY, JSON.stringify(cfg));
                 cloudApp = cloudDb = null;
                 cloudSetStatus('Đã lưu Firebase config trong trình duyệt này. Bấm “☁️ Tạo/Bật link” để dùng.', 'online');
+                updateCloudSyncUI();
             } catch (err) {
-                alert('Firebase config chưa đúng JSON hoặc thiếu thông tin: ' + (err.message || err));
+                alert('Firebase config chưa đúng hoặc thiếu thông tin: ' + (err.message || err));
             }
         }
 
@@ -3871,6 +4514,12 @@ ${getPlainTextForAI(opt)}`;
             }
             cloudRef = null;
             cloudShareId = null;
+            cloudRoomSecurity = null;
+            cloudEditHash = '';
+            cloudAdminHash = '';
+            cloudViewPassword = '';
+            cloudReadOnlyMode = false;
+            cloudRoomIsEncrypted = false;
             if (clearUrl) cloudReplaceUrlExamId('');
             updateCloudSyncUI();
             cloudSetStatus('Đã tắt Cloud Sync. Đề hiện chỉ tự lưu trong máy này.', '');
@@ -3881,7 +4530,6 @@ ${getPlainTextForAI(opt)}`;
             const roomId = cloudGetExamIdFromUrl();
             if (roomId) startCloudRealtimeSync(roomId, { pushCurrent: false, silent: true });
         }
-
 
         let currentTabFilter = 'all';
         let isTabGridMode = false;
