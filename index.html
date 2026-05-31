@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>System creat JLPT test</title>
+    <!-- FIX 2026-05-31: cloud share visitor placeholder has features to avoid initApp crash -->
     <script src="https://unpkg.com/html-docx-js@0.3.1/dist/html-docx.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -11564,7 +11565,9 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
             examSections = [{
                 id: 'cloud_locked_placeholder',
                 type: 'dokkai',
+                parentType: 'dokkai',
                 title: 'Đề đang khóa',
+                features: { hasEditor: true, hasImage: false, hasUnderline: false, hasStar: false, isGrouped: true },
                 groups: [{ passageHTML: '<p>Nhập mật khẩu mở đề để xem nội dung.</p>', questions: [] }]
             }];
             const filenameInput = document.getElementById('filename-field');
