@@ -4577,7 +4577,29 @@ ${getPlainTextForAI(opt)}`;
                 alert('Chưa có mã đề để copy. Bấm “☁️ Tạo/Bật link” trước nhé.');
                 return;
             }
-            const link = makeCloudShareUrl(id);
+            let link = makeCloudShareUrl(id);
+
+            // FIX V5: Nếu admin đang mở file bằng C:/... hoặc file://..., link đó chỉ chạy trên máy admin.
+            // Khi copy để gửi người khác, yêu cầu nhập URL GitHub Pages để tạo link công khai đúng.
+            try {
+                const currentUrl = new URL(window.location.href);
+                if (currentUrl.protocol === 'file:' || /^file:/i.test(link) || /^https?:\/\/localhost/i.test(link)) {
+                    const savedPublicBase = localStorage.getItem('jlpt_cloud_public_share_base_url_v1') || '';
+                    const publicBase = prompt(
+                        `Cậu đang mở trang bằng file trong máy (C:/... hoặc file://...), link này người khác không truy cập được.
+
+Hãy dán link GitHub Pages của trang index.html vào đây, ví dụ:
+https://ten-user.github.io/ten-repo/
+
+Từ lần sau hệ thống sẽ nhớ link này:`,
+                        savedPublicBase
+                    );
+                    if (!publicBase) return;
+                    localStorage.setItem('jlpt_cloud_public_share_base_url_v1', publicBase.trim());
+                    link = cloudMakeShareUrlWithEmbeddedConfig(id, publicBase.trim());
+                }
+            } catch (_) {}
+
             const doneMsg = 'Đã copy link đề chung. Gửi MẬT KHẨU MỞ ĐỀ riêng; chỉ gửi MẬT KHẨU SỬA cho người được phép chỉnh.';
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(link).then(() => showRTEToast(doneMsg)).catch(() => prompt('Copy link đề chung:', link));
@@ -11314,6 +11336,9 @@ ${getPlainTextForAI(opt)}`;
         let cloudAccessGuardResolver = null;
         let cloudAccessGuardBusy = false;
         let cloudAccessLastMode = '';
+        let cloudVisitorConnectWatchdogTimer = null;
+        let cloudVisitorConnectHardTimeoutTimer = null;
+        let cloudVisitorManualFetchBusy = false;
         if (CLOUD_ACCESS_IS_SHARE_VISITOR) {
             isCloudShareFeatureEnabled = true;
         }
@@ -11409,6 +11434,9 @@ ${getPlainTextForAI(opt)}`;
 
         function cloudSetAccessGuard(mode, opts = {}) {
             cloudAccessLastMode = mode;
+            if (mode !== 'connecting' && typeof cloudClearVisitorConnectWatchdog === 'function') {
+                cloudClearVisitorConnectWatchdog();
+            }
             const guard = cloudEnsureAccessGuardElement();
             const titleEl = guard.querySelector('#cloud-lock-title');
             const msgEl = guard.querySelector('#cloud-lock-message');
@@ -11517,13 +11545,13 @@ ${getPlainTextForAI(opt)}`;
                 icon: missingConfig ? '⚙️' : '⚠️',
                 title: missingConfig ? 'Chưa kết nối được Firebase' : 'Không kiểm tra được link đề',
                 message: missingConfig
-                    ? 'Link share chưa có Firebase config trong trình duyệt/file này nên chưa thể hiện ô nhập mật khẩu mở đề. Hãy dán Firebase Web Config một lần, sau đó hệ thống sẽ tự kiểm tra lại link.'
+                    ? 'Link share chưa có Firebase config nên máy người truy cập không thể kết nối Firebase để hiện ô nhập mật khẩu. Hãy mở trang admin bằng bản mới, bấm “☁️ Tạo/Bật link” hoặc copy lại link; link mới sẽ tự kèm config. Hoặc bấm nút dưới để dán Firebase Web Config một lần.'
                     : 'Hệ thống chưa kiểm tra được trạng thái link share: ' + msg,
                 retryText: missingConfig ? '⚙️ Dán Firebase config' : 'Tải lại trạng thái',
                 hideRetry: false,
                 footnote: missingConfig
-                    ? 'Lưu ý: mở file local/đổi tên file có thể làm mất config đã lưu trong trình duyệt, nên trang sẽ đứng ở bước kiểm tra link.'
-                    : 'Nếu mạng hoặc quyền Firebase Database bị chặn, trang sẽ chưa thể chuyển sang màn hình nhập mật khẩu.'
+                    ? 'Bản v4 sẽ tạo link dạng ?exam=...&fcfg=... để người nhận link không cần tự dán config.'
+                    : 'Nếu mạng, Realtime Database Rules hoặc tiện ích chặn script đang chặn Firebase, trang sẽ chưa thể chuyển sang màn hình nhập mật khẩu.'
             });
             cloudSetStatus(missingConfig
                 ? 'Thiếu Firebase config nên chưa thể mở màn hình nhập mật khẩu đề.'
@@ -11908,6 +11936,180 @@ ${getPlainTextForAI(opt)}`;
             cloudRenderShareVisitorPanel();
         }
 
+        // --- FIX V4: Link share phải tự mang Firebase config + không treo mãi ở màn hình "Đang kiểm tra link đề" ---
+        // Lý do: file GitHub để trống CLOUD_SYNC_FIREBASE_CONFIG, nên máy người truy cập không có localStorage config sẽ không thể đọc Firebase.
+        // Cách sửa: link share do admin copy sẽ kèm tham số fcfg=... (Firebase Web Config đã mã hoá base64url).
+        // Firebase Web Config không phải mật khẩu bí mật; nội dung đề vẫn được mã hoá bằng mật khẩu mở đề.
+        function cloudBase64UrlEncodeUtf8(text) {
+            const bytes = new TextEncoder().encode(String(text || ''));
+            let bin = '';
+            bytes.forEach(b => { bin += String.fromCharCode(b); });
+            return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+        }
+
+        function cloudBase64UrlDecodeUtf8(encoded) {
+            let raw = String(encoded || '').replace(/-/g, '+').replace(/_/g, '/');
+            while (raw.length % 4) raw += '=';
+            const bin = atob(raw);
+            const bytes = new Uint8Array([...bin].map(ch => ch.charCodeAt(0)));
+            return new TextDecoder().decode(bytes);
+        }
+
+        function cloudGetFirebaseConfigFromUrl() {
+            try {
+                const url = new URL(window.location.href);
+                const encoded = url.searchParams.get('fcfg') || url.searchParams.get('firebaseConfig');
+                if (!encoded) return null;
+                const cfg = JSON.parse(cloudBase64UrlDecodeUtf8(encoded));
+                return cloudFirebaseConfigLooksValid(cfg) ? cfg : null;
+            } catch (_) { return null; }
+        }
+
+        const cloudV4OriginalGetCloudFirebaseConfig = getCloudFirebaseConfig;
+        getCloudFirebaseConfig = function() {
+            const fromUrl = cloudGetFirebaseConfigFromUrl();
+
+            // FIX V5: Khi người truy cập mở link share, ưu tiên config nằm trong link (?fcfg=...).
+            // Nếu máy người truy cập từng lưu nhầm config Firebase cũ ở localStorage, bản cũ sẽ đọc nhầm database
+            // và bị đứng ở màn hình “Đang kiểm tra link đề”.
+            if (typeof cloudIsShareVisitor === 'function' && cloudIsShareVisitor() && cloudFirebaseConfigLooksValid(fromUrl)) {
+                try { localStorage.setItem(CLOUD_SYNC_LOCAL_CONFIG_KEY, JSON.stringify(fromUrl)); } catch (_) {}
+                return fromUrl;
+            }
+
+            const localOrStatic = cloudV4OriginalGetCloudFirebaseConfig();
+            if (cloudFirebaseConfigLooksValid(localOrStatic)) return localOrStatic;
+
+            if (cloudFirebaseConfigLooksValid(fromUrl)) {
+                try { localStorage.setItem(CLOUD_SYNC_LOCAL_CONFIG_KEY, JSON.stringify(fromUrl)); } catch (_) {}
+                return fromUrl;
+            }
+            return null;
+        };
+
+        function cloudGetConfigForShareUrl() {
+            try {
+                const cfg = cloudV4OriginalGetCloudFirebaseConfig() || cloudGetFirebaseConfigFromUrl() || getCloudFirebaseConfig();
+                return cloudFirebaseConfigLooksValid(cfg) ? cfg : null;
+            } catch (_) { return null; }
+        }
+
+        function cloudShareUrlNeedsConfigParam() {
+            // Nếu source HTML chưa hard-code config thì link share cần mang config để máy người khác tự kết nối được.
+            return !cloudFirebaseConfigLooksValid(CLOUD_SYNC_FIREBASE_CONFIG);
+        }
+
+        function cloudMakeShareUrlWithEmbeddedConfig(id = cloudShareId || currentExamId, baseHref = window.location.href) {
+            const url = new URL(baseHref || window.location.href, window.location.href);
+            url.searchParams.set('exam', id || '');
+            // Không lan truyền các tham số lỗi/debug cũ.
+            url.searchParams.delete('firebaseConfig');
+            if (cloudShareUrlNeedsConfigParam()) {
+                const cfg = cloudGetConfigForShareUrl();
+                if (cfg) {
+                    url.searchParams.set('fcfg', cloudBase64UrlEncodeUtf8(JSON.stringify(cfg)));
+                }
+            } else {
+                url.searchParams.delete('fcfg');
+            }
+            return url.toString();
+        }
+
+        makeCloudShareUrl = cloudMakeShareUrlWithEmbeddedConfig;
+
+        function cloudClearVisitorConnectWatchdog() {
+            if (cloudVisitorConnectWatchdogTimer) clearTimeout(cloudVisitorConnectWatchdogTimer);
+            if (cloudVisitorConnectHardTimeoutTimer) clearTimeout(cloudVisitorConnectHardTimeoutTimer);
+            cloudVisitorConnectWatchdogTimer = null;
+            cloudVisitorConnectHardTimeoutTimer = null;
+        }
+
+        function cloudDelay(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        async function cloudVisitorFetchValueOnce(roomId, timeoutMs = 8000) {
+            ensureCloudFirebaseReady();
+            const ref = cloudDb.ref(`${CLOUD_SYNC_PATH}/${roomId}`);
+            const oncePromise = ref.once('value')
+                .then(snapshot => ({ ok: true, value: snapshot.val() }))
+                .catch(error => ({ ok: false, error }));
+            const timeoutPromise = cloudDelay(timeoutMs).then(() => ({ timeout: true }));
+            const result = await Promise.race([oncePromise, timeoutPromise]);
+            if (result.timeout) {
+                throw new Error('Firebase không phản hồi sau ' + Math.round(timeoutMs / 1000) + ' giây. Có thể databaseURL sai, Realtime Database chưa bật, quyền đọc bị chặn, mạng chặn firebaseio.com, hoặc tiện ích chặn quảng cáo/chặn script đang cản kết nối.');
+            }
+            if (!result.ok) throw result.error;
+            return result.value;
+        }
+
+        async function cloudVisitorProcessRemoteValue(val, roomId, sourceLabel = 'kiểm tra nhanh') {
+            if (!cloudIsShareVisitor()) return false;
+            if (!val) {
+                cloudReadOnlyMode = true;
+                cloudShowNotFound('Trang này không tồn tại vì mã đề chưa có dữ liệu trên Firebase, admin đã tắt link, hoặc link cũ đã bị thay bằng link mới.');
+                return true;
+            }
+            cloudApplySecurityFromRemote(val, roomId);
+            if (cloudShareIsRevokedOrOff(cloudRoomSecurity)) {
+                cloudReadOnlyMode = true;
+                cloudShowNotFound('Trang này không tồn tại vì admin đã tắt link share hoặc đổi sang link mới.');
+                return true;
+            }
+            try {
+                cloudApplyingRemote = true;
+                const examData = await normalizeCloudExamSnapshotSecure(val, roomId);
+                if (!examData) return true;
+                loadExamData(examData);
+                forceAutoSave();
+                cloudSetStatus(
+                    cloudCanWriteToCurrentRoom()
+                        ? `✅ Đã nhận & giải mã cập nhật cloud: ${examData.filename}\n🔓 Đã mở khóa sửa cloud trên trình duyệt này.`
+                        : `✅ Đã nhận & giải mã cập nhật cloud: ${examData.filename}\n🔒 Chế độ chỉ xem cloud. Nhập mật khẩu sửa ở vùng “Chỉnh sửa chung” nếu muốn chỉnh đề.`,
+                    cloudCanWriteToCurrentRoom() ? 'online' : 'error'
+                );
+                cloudHideAccessGuard();
+                cloudApplyShareAccessModeUI();
+                return true;
+            } catch (err) {
+                console.error(err);
+                cloudSetAccessGuard('config-missing', {
+                    icon: '⚠️',
+                    title: 'Không đọc được dữ liệu đề',
+                    message: 'Đã kết nối được Firebase nhưng chưa đọc/giải mã được đề: ' + ((err && err.message) || err),
+                    retryText: 'Tải lại trạng thái',
+                    hideRetry: false,
+                    footnote: 'Kiểm tra lại mật khẩu mở đề hoặc dữ liệu cloud của mã phòng này.'
+                });
+                return true;
+            } finally {
+                cloudApplyingRemote = false;
+                updateCloudSyncUI();
+            }
+        }
+
+        function cloudArmVisitorConnectWatchdog(roomId) {
+            if (!cloudIsShareVisitor() || !roomId) return;
+            cloudClearVisitorConnectWatchdog();
+            cloudVisitorConnectWatchdogTimer = setTimeout(async () => {
+                if (!cloudIsShareVisitor() || cloudAccessLastMode !== 'connecting' || cloudVisitorManualFetchBusy) return;
+                cloudVisitorManualFetchBusy = true;
+                try {
+                    const val = await cloudVisitorFetchValueOnce(roomId, 8000);
+                    if (cloudAccessLastMode === 'connecting') await cloudVisitorProcessRemoteValue(val, roomId, 'watchdog');
+                } catch (err) {
+                    if (cloudAccessLastMode === 'connecting') cloudShowShareVisitorConnectError(err, roomId);
+                } finally {
+                    cloudVisitorManualFetchBusy = false;
+                }
+            }, 4500);
+
+            cloudVisitorConnectHardTimeoutTimer = setTimeout(() => {
+                if (!cloudIsShareVisitor() || cloudAccessLastMode !== 'connecting') return;
+                cloudShowShareVisitorConnectError(new Error('Firebase không phản hồi. Nếu link không hiện ô nhập mật khẩu, hãy kiểm tra Firebase config trong link, Realtime Database, quyền đọc, mạng hoặc tiện ích chặn script.'), roomId);
+            }, 16000);
+        }
+
         function cloudInstallDevToolsBlocker() {
             // Chỉ chặn DevTools ở LINK NGƯỜI TRUY CẬP (?exam=...).
             // Trang admin không bị hạn chế để chủ đề còn debug/sửa web bình thường.
@@ -12105,10 +12307,11 @@ ${getPlainTextForAI(opt)}`;
             return result;
         };
 
+        // FIX V5: Không được ghi đè mất ?fcfg=... ở cuối file.
+        // Bản v4 đã tạo hàm cloudMakeShareUrlWithEmbeddedConfig(), nhưng phía dưới lại gán đè makeCloudShareUrl
+        // thành link chỉ có ?exam=..., khiến máy người truy cập không có Firebase config nên không hiện ô nhập mật khẩu.
         makeCloudShareUrl = function(id = cloudShareId || currentExamId) {
-            const url = new URL(window.location.href);
-            url.searchParams.set('exam', id || '');
-            return url.toString();
+            return cloudMakeShareUrlWithEmbeddedConfig(id);
         };
 
         cloudReplaceUrlExamId = function(id) {
@@ -12185,8 +12388,9 @@ ${getPlainTextForAI(opt)}`;
 
         const cloudOriginalStartRealtimeSync = startCloudRealtimeSync;
         startCloudRealtimeSync = async function(id, options = {}) {
-            if (cloudIsShareVisitor()) {
-                const roomId = cloudSanitizeExamId(id || cloudShareId || CLOUD_ACCESS_INITIAL_ROOM_ID || currentExamId || '');
+            const isVisitor = cloudIsShareVisitor();
+            const roomId = cloudSanitizeExamId(id || cloudShareId || CLOUD_ACCESS_INITIAL_ROOM_ID || currentExamId || '');
+            if (isVisitor) {
                 try {
                     ensureCloudFirebaseReady();
                 } catch (err) {
@@ -12194,8 +12398,17 @@ ${getPlainTextForAI(opt)}`;
                     return;
                 }
                 cloudPrepareShareAccessUI();
+                cloudArmVisitorConnectWatchdog(roomId);
             }
-            return cloudOriginalStartRealtimeSync(id, options);
+            try {
+                return await cloudOriginalStartRealtimeSync(id, options);
+            } catch (err) {
+                if (isVisitor) {
+                    cloudShowShareVisitorConnectError(err, roomId);
+                    return;
+                }
+                throw err;
+            }
         };
 
         document.addEventListener('input', function(event) {
