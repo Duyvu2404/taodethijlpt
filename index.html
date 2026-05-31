@@ -4911,7 +4911,7 @@ ${getPlainTextForAI(opt)}`;
             const starToken = mode === 'paren' ? QUESTION_PAREN_BLANK_TOKEN : QUESTION_STAR_TOKEN;
 
             let out = String(html || '')
-                .replace(/ /g, ' ')
+                .replace(/ /g, ' ')
                 .replace(/&nbsp;/g, ' ');
 
             // Chuẩn hóa ô trống dạng ngoặc do OCR/Lens hay đưa: ( ), （ ） → （　　　）.
@@ -5065,8 +5065,7 @@ ${getPlainTextForAI(opt)}`;
 
         function insertQuestionFixedTokenOnce(e, input, gIdx, qIdx, type, afterSync) {
             stopQuestionTokenSpaceEvent(e);
-            const s
-afeType = String(type || 'blank');
+            const safeType = String(type || 'blank');
 
             // Chống cùng MỘT sự kiện Space bị nhiều handler xử lý hai lần,
             // nhưng vẫn cho phép người dùng nhấn Space liên tiếp để tạo nhiều khối.
