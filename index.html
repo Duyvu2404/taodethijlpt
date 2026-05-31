@@ -8,6 +8,9 @@
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+    <!-- Firebase Cloud Sync: dùng Realtime Database để nhiều người cùng mở/chỉnh một đề qua link share. -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -1545,6 +1548,83 @@
             border-left-color: #0284c7;
         }
 
+    
+
+        /* --- CLOUD SYNC: chia sẻ link & chỉnh sửa chung qua Firebase Realtime Database --- */
+        .cloud-sync-panel {
+            border-color: #bfdbfe;
+            background: linear-gradient(180deg, #eff6ff, #ffffff);
+        }
+        .cloud-sync-status {
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid #dbeafe;
+            background: #f8fafc;
+            color: #475569;
+            font-size: 12px;
+            font-weight: 800;
+            line-height: 1.45;
+            margin-bottom: 10px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .cloud-sync-status.online {
+            border-color: #86efac;
+            background: #f0fdf4;
+            color: #166534;
+        }
+        .cloud-sync-status.saving {
+            border-color: #fde68a;
+            background: #fffbeb;
+            color: #92400e;
+        }
+        .cloud-sync-status.error {
+            border-color: #fecaca;
+            background: #fef2f2;
+            color: #991b1b;
+        }
+        .cloud-share-id {
+            font-size: 11px;
+            color: #475569;
+            background: #ffffff;
+            border: 1px dashed #bfdbfe;
+            border-radius: 8px;
+            padding: 8px 10px;
+            margin-bottom: 10px;
+            line-height: 1.45;
+            word-break: break-word;
+        }
+        .cloud-sync-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .cloud-sync-actions button {
+            border: 1px solid #bfdbfe;
+            background: #ffffff;
+            color: #1d4ed8;
+            border-radius: 8px;
+            padding: 8px 9px;
+            font-size: 12px;
+            font-weight: 900;
+            cursor: pointer;
+            transition: .2s;
+        }
+        .cloud-sync-actions button:hover { background: #dbeafe; transform: translateY(-1px); }
+        .cloud-sync-actions button.cloud-danger {
+            border-color: #fecaca;
+            color: #b91c1c;
+        }
+        .cloud-sync-actions button.cloud-danger:hover { background: #fee2e2; }
+        .cloud-sync-note {
+            margin-top: 10px;
+            font-size: 11px;
+            color: #64748b;
+            line-height: 1.45;
+            padding-top: 9px;
+            border-top: 1px dashed #cbd5e1;
+        }
+
     </style>
 </head>
 <body>
@@ -1622,6 +1702,23 @@
                 <br>
                 <i>*Nhấn vào <b>ô câu hỏi</b> sẽ giúp bạn ẩn/ mở khung lời giải ứng với câu hỏi đó </i>
                 <div class="answer-table-hint">Mẹo bảng lời giải: gõ chữ <b>IN HOA</b> trong ô từ vựng để hệ thống nhận vào cột <b>Âm Hán</b>. Ghi chú đã có ô riêng để xuất Excel.</div>
+            </div>
+        </div>
+
+        <div class="card cloud-sync-panel">
+            <h3>🌐 Chỉnh sửa chung</h3>
+            <div id="cloud-sync-status" class="cloud-sync-status">Cloud Sync chưa bật. Đề hiện đang lưu riêng trong máy này.</div>
+            <div id="cloud-share-id" class="cloud-share-id">Link đề chung: chưa có</div>
+            <div class="cloud-sync-actions">
+                <button type="button" onclick="startCloudRoomForCurrentExam()">☁️ Tạo/Bật link</button>
+                <button type="button" onclick="copyCloudShareLink()">🔗 Copy link</button>
+                <button type="button" onclick="openCloudRoomFromPrompt()">📥 Mở link/mã</button>
+                <button type="button" onclick="pushCurrentExamToCloudNow()">💾 Đẩy lên cloud</button>
+                <button type="button" onclick="configureCloudFirebase()">⚙️ Firebase</button>
+                <button type="button" class="cloud-danger" onclick="stopCloudRealtimeSync(true)">⛔ Tắt cloud</button>
+            </div>
+            <div class="cloud-sync-note">
+                Gemini API key không lưu chung trong đề. Mỗi người vẫn tự nhập key ở Gemini Key Center và key chỉ nằm trong trình duyệt của người đó.
             </div>
         </div>
 
@@ -3389,6 +3486,346 @@ ${getPlainTextForAI(opt)}`;
         let globalCounter = 1;
         let currentExamId = null;
         let mergedExamIds = [];
+
+        // ==========================================
+        // CLOUD SYNC: share link để nhiều tài khoản/máy cùng xem & sửa 1 đề
+        // Dùng Firebase Realtime Database vì đề có thể chứa đoạn đọc + ảnh base64 lớn hơn giới hạn Firestore 1MB.
+        // Lưu ý: Firebase web config là config công khai của app, KHÔNG phải Gemini API key.
+        // Không dán Gemini API key vào đây. Gemini key vẫn lưu riêng ở localStorage của từng người.
+        //
+        // Cách bật nhanh:
+        // 1) Tạo Firebase project -> Realtime Database -> Start in test mode hoặc set rules theo hướng dẫn.
+        // 2) Copy web config, thay các giá trị PASTE_... bên dưới rồi upload lại GitHub.
+        // 3) Mở app -> bấm "☁️ Tạo/Bật link" -> copy link gửi bạn bè.
+        // ==========================================
+        const CLOUD_SYNC_FIREBASE_CONFIG = {
+            apiKey: "PASTE_FIREBASE_WEB_API_KEY_HERE",
+            authDomain: "PASTE_PROJECT_ID.firebaseapp.com",
+            databaseURL: "https://PASTE_PROJECT_ID-default-rtdb.firebaseio.com",
+            projectId: "PASTE_PROJECT_ID",
+            storageBucket: "PASTE_PROJECT_ID.appspot.com",
+            messagingSenderId: "PASTE_SENDER_ID",
+            appId: "PASTE_APP_ID"
+        };
+        const CLOUD_SYNC_LOCAL_CONFIG_KEY = 'jlpt_cloud_firebase_config_v1';
+        const CLOUD_SYNC_LAST_EXAM_KEY = 'jlpt_cloud_last_exam_id_v1';
+        const CLOUD_SYNC_PATH = 'sharedExams';
+        const cloudClientId = (() => {
+            const key = 'jlpt_cloud_client_id_v1';
+            let id = localStorage.getItem(key);
+            if (!id) {
+                id = 'client_' + Math.random().toString(36).slice(2, 10) + '_' + Date.now().toString(36);
+                localStorage.setItem(key, id);
+            }
+            return id;
+        })();
+        let cloudApp = null;
+        let cloudDb = null;
+        let cloudRef = null;
+        let cloudShareId = null;
+        let cloudApplyingRemote = false;
+        let cloudSaveTimeout = null;
+        let cloudLastLocalWriteAt = 0;
+        let cloudLastRemoteTimestamp = 0;
+
+        function cloudLooksLikePlaceholder(value) {
+            return !value || /PASTE_|YOUR_|project-id|PROJECT_ID/i.test(String(value));
+        }
+
+        function cloudFirebaseConfigLooksValid(cfg) {
+            if (!cfg || typeof cfg !== 'object') return false;
+            return Boolean(cfg.apiKey && cfg.databaseURL && cfg.projectId)
+                && !cloudLooksLikePlaceholder(cfg.apiKey)
+                && !cloudLooksLikePlaceholder(cfg.databaseURL)
+                && !cloudLooksLikePlaceholder(cfg.projectId);
+        }
+
+        function getCloudFirebaseConfig() {
+            try {
+                const localCfg = JSON.parse(localStorage.getItem(CLOUD_SYNC_LOCAL_CONFIG_KEY) || 'null');
+                if (cloudFirebaseConfigLooksValid(localCfg)) return localCfg;
+            } catch (_) {}
+            if (cloudFirebaseConfigLooksValid(CLOUD_SYNC_FIREBASE_CONFIG)) return CLOUD_SYNC_FIREBASE_CONFIG;
+            return null;
+        }
+
+        function cloudSetStatus(message, type = '') {
+            const el = document.getElementById('cloud-sync-status');
+            if (el) {
+                el.textContent = message;
+                el.className = 'cloud-sync-status' + (type ? ' ' + type : '');
+            }
+            const titleStatus = document.getElementById('exam-title-save-status');
+            if (titleStatus) {
+                if (type === 'online') titleStatus.textContent = 'Đã lưu cloud';
+                else if (type === 'saving') titleStatus.textContent = 'Đang lưu...';
+                else if (type === 'error') titleStatus.textContent = 'Lỗi cloud';
+                else titleStatus.textContent = 'Đã lưu máy';
+            }
+        }
+
+        function updateCloudSyncUI() {
+            const shareEl = document.getElementById('cloud-share-id');
+            if (shareEl) {
+                if (cloudShareId) {
+                    shareEl.innerHTML = `<b>Mã đề:</b> ${escapeHtml(cloudShareId)}<br><b>Link:</b> ${escapeHtml(makeCloudShareUrl(cloudShareId))}`;
+                } else {
+                    shareEl.textContent = 'Link đề chung: chưa có';
+                }
+            }
+        }
+
+        function makeCloudShareUrl(id = cloudShareId || currentExamId) {
+            const url = new URL(window.location.href);
+            url.searchParams.set('exam', id || '');
+            return url.toString();
+        }
+
+        function cloudReplaceUrlExamId(id) {
+            try {
+                const url = new URL(window.location.href);
+                if (id) url.searchParams.set('exam', id);
+                else url.searchParams.delete('exam');
+                window.history.replaceState({}, '', url.toString());
+            } catch (_) {}
+        }
+
+        function cloudGetExamIdFromText(text) {
+            const raw = String(text || '').trim();
+            if (!raw) return '';
+            try {
+                const url = new URL(raw);
+                const fromUrl = url.searchParams.get('exam');
+                if (fromUrl) return cloudSanitizeExamId(fromUrl);
+            } catch (_) {}
+            return cloudSanitizeExamId(raw);
+        }
+
+        function cloudGetExamIdFromUrl() {
+            try {
+                return cloudSanitizeExamId(new URL(window.location.href).searchParams.get('exam') || '');
+            } catch (_) { return ''; }
+        }
+
+        function cloudSanitizeExamId(id) {
+            return String(id || '').trim().replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80);
+        }
+
+        function ensureCloudFirebaseReady() {
+            const cfg = getCloudFirebaseConfig();
+            if (!cfg) {
+                cloudSetStatus('Chưa có Firebase config. Bấm ⚙️ Firebase để dán config, hoặc thay CLOUD_SYNC_FIREBASE_CONFIG trong code trước khi up GitHub.', 'error');
+                throw new Error('Missing Firebase config');
+            }
+            if (!window.firebase || !firebase.database) {
+                cloudSetStatus('Chưa tải được Firebase SDK. Kiểm tra mạng hoặc script Firebase trong file HTML.', 'error');
+                throw new Error('Firebase SDK not loaded');
+            }
+            if (!cloudApp) {
+                try {
+                    cloudApp = firebase.apps && firebase.apps.length ? firebase.app() : firebase.initializeApp(cfg);
+                    cloudDb = firebase.database(cloudApp);
+                } catch (err) {
+                    cloudSetStatus('Firebase config lỗi: ' + (err.message || err), 'error');
+                    throw err;
+                }
+            }
+            return cloudDb;
+        }
+
+        function buildCurrentExamSnapshot() {
+            const filename = document.getElementById('filename-field')?.value?.trim() || 'De_Thi_Chua_Dat_Ten';
+            return {
+                id: currentExamId || generateId(),
+                filename,
+                date: new Date().toLocaleString('vi-VN'),
+                timestamp_ms: Date.now(),
+                data: examSections || [],
+                mergedSources: Array.isArray(mergedExamIds) ? mergedExamIds : []
+            };
+        }
+
+        function normalizeCloudExamSnapshot(raw, idFallback = '') {
+            const val = raw || {};
+            return {
+                id: cloudSanitizeExamId(val.id || idFallback || currentExamId || generateId()),
+                filename: String(val.filename || 'De_Thi_Chia_Se'),
+                date: val.date || new Date().toLocaleString('vi-VN'),
+                timestamp_ms: Number(val.timestamp_ms || Date.now()),
+                data: migrateDataToV8(Array.isArray(val.data) ? JSON.parse(JSON.stringify(val.data)) : []),
+                mergedSources: Array.isArray(val.mergedSources) ? val.mergedSources : []
+            };
+        }
+
+        async function pushSnapshotToCloud(examData, reason = 'auto') {
+            if (!cloudRef || cloudApplyingRemote) return;
+            const payload = JSON.parse(JSON.stringify(examData || buildCurrentExamSnapshot()));
+            payload.id = cloudShareId || payload.id || currentExamId || generateId();
+            payload.updatedBy = cloudClientId;
+            payload.updatedAt = firebase.database.ServerValue.TIMESTAMP;
+            payload.timestamp_ms = Date.now();
+            payload.date = new Date().toLocaleString('vi-VN');
+            cloudLastLocalWriteAt = Date.now();
+            cloudSetStatus(reason === 'manual' ? '☁️ Đang đẩy đề hiện tại lên cloud...' : '☁️ Đang tự lưu lên cloud...', 'saving');
+            try {
+                await cloudRef.set(payload);
+                localStorage.setItem(CLOUD_SYNC_LAST_EXAM_KEY, payload.id);
+                cloudSetStatus('✅ Đã lưu trên cloud. Người mở link sẽ thấy đề mới nhất.', 'online');
+                updateCloudSyncUI();
+            } catch (err) {
+                console.error(err);
+                cloudSetStatus('Không lưu được cloud: ' + (err.message || err), 'error');
+            }
+        }
+
+        function cloudQueueSave(examData) {
+            if (!cloudRef || !cloudShareId || cloudApplyingRemote) return;
+            if (cloudSaveTimeout) clearTimeout(cloudSaveTimeout);
+            const snapshot = JSON.parse(JSON.stringify(examData || buildCurrentExamSnapshot()));
+            cloudSaveTimeout = setTimeout(() => pushSnapshotToCloud(snapshot, 'auto'), 1200);
+        }
+
+        async function startCloudRealtimeSync(id, options = {}) {
+            const roomId = cloudSanitizeExamId(id || currentExamId || generateId());
+            if (!roomId) return;
+            try {
+                ensureCloudFirebaseReady();
+            } catch (err) {
+                if (options.silent !== true) alert('Chưa bật được Cloud Sync: ' + (err.message || err));
+                return;
+            }
+
+            if (cloudRef) {
+                try { cloudRef.off(); } catch (_) {}
+            }
+
+            cloudShareId = roomId;
+            if (!currentExamId) currentExamId = roomId;
+            localStorage.setItem(CLOUD_SYNC_LAST_EXAM_KEY, roomId);
+            cloudReplaceUrlExamId(roomId);
+            cloudRef = cloudDb.ref(`${CLOUD_SYNC_PATH}/${roomId}`);
+            updateCloudSyncUI();
+            cloudSetStatus('🔌 Đang kết nối đề chung...', 'saving');
+
+            if (options.pushCurrent) {
+                await pushSnapshotToCloud({ ...buildCurrentExamSnapshot(), id: roomId }, 'manual');
+            }
+
+            cloudRef.on('value', (snapshot) => {
+                const val = snapshot.val();
+                if (!val) {
+                    cloudSetStatus('Cloud room này chưa có dữ liệu. Bấm “💾 Đẩy lên cloud” để tạo dữ liệu đầu tiên.', 'saving');
+                    return;
+                }
+
+                const incomingUpdatedAt = Number(val.updatedAt || 0);
+                if (val.updatedBy === cloudClientId && Date.now() - cloudLastLocalWriteAt < 6000) {
+                    cloudLastRemoteTimestamp = Math.max(cloudLastRemoteTimestamp, incomingUpdatedAt || Date.now());
+                    cloudSetStatus('✅ Đã lưu trên cloud. Người mở link sẽ thấy đề mới nhất.', 'online');
+                    return;
+                }
+                if (incomingUpdatedAt && incomingUpdatedAt < cloudLastRemoteTimestamp) return;
+                cloudLastRemoteTimestamp = incomingUpdatedAt || Date.now();
+
+                try {
+                    cloudApplyingRemote = true;
+                    const examData = normalizeCloudExamSnapshot(val, roomId);
+                    loadExamData(examData);
+                    forceAutoSave(); // lưu thêm một bản dự phòng vào máy, không đẩy ngược vì cloudApplyingRemote=true
+                    cloudSetStatus(`✅ Đã nhận cập nhật cloud: ${examData.filename}`, 'online');
+                } catch (err) {
+                    console.error(err);
+                    cloudSetStatus('Lỗi đọc dữ liệu cloud: ' + (err.message || err), 'error');
+                } finally {
+                    cloudApplyingRemote = false;
+                    updateCloudSyncUI();
+                }
+            }, (err) => {
+                console.error(err);
+                cloudSetStatus('Firebase Database bị chặn/quyền chưa đúng: ' + (err.message || err), 'error');
+            });
+        }
+
+        async function startCloudRoomForCurrentExam() {
+            if (!currentExamId) currentExamId = generateId();
+            await startCloudRealtimeSync(currentExamId, { pushCurrent: true });
+            setTimeout(copyCloudShareLink, 250);
+        }
+
+        async function pushCurrentExamToCloudNow() {
+            if (!cloudShareId) {
+                await startCloudRealtimeSync(currentExamId || generateId(), { pushCurrent: true });
+                return;
+            }
+            await pushSnapshotToCloud({ ...buildCurrentExamSnapshot(), id: cloudShareId }, 'manual');
+        }
+
+        function copyCloudShareLink() {
+            const id = cloudShareId || currentExamId;
+            if (!id) {
+                alert('Chưa có mã đề để copy. Bấm “☁️ Tạo/Bật link” trước nhé.');
+                return;
+            }
+            const link = makeCloudShareUrl(id);
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(link).then(() => showRTEToast('Đã copy link đề chung.')).catch(() => prompt('Copy link đề chung:', link));
+            } else {
+                prompt('Copy link đề chung:', link);
+            }
+        }
+
+        function openCloudRoomFromPrompt() {
+            const input = prompt('Dán link đề chung hoặc mã đề cloud:');
+            const roomId = cloudGetExamIdFromText(input);
+            if (!roomId) return;
+            startCloudRealtimeSync(roomId, { pushCurrent: false });
+        }
+
+        function configureCloudFirebase() {
+            const current = getCloudFirebaseConfig() || CLOUD_SYNC_FIREBASE_CONFIG;
+            const sample = JSON.stringify(current, null, 2);
+            const text = prompt(
+                'Dán Firebase Web Config dạng JSON.\n\nLưu ý: Đây là Firebase web config công khai, KHÔNG phải Gemini API key. Muốn mọi người dùng ngay sau khi mở link GitHub, hãy thay CLOUD_SYNC_FIREBASE_CONFIG trong code rồi up lại.\n\nConfig hiện tại:',
+                sample
+            );
+            if (text === null) return;
+            const trimmed = text.trim();
+            if (!trimmed) {
+                localStorage.removeItem(CLOUD_SYNC_LOCAL_CONFIG_KEY);
+                cloudApp = cloudDb = null;
+                cloudSetStatus('Đã xóa Firebase config trong trình duyệt này.', '');
+                return;
+            }
+            try {
+                const cfg = JSON.parse(trimmed);
+                if (!cloudFirebaseConfigLooksValid(cfg)) throw new Error('Config thiếu apiKey / databaseURL / projectId hoặc vẫn còn PASTE_...');
+                localStorage.setItem(CLOUD_SYNC_LOCAL_CONFIG_KEY, JSON.stringify(cfg));
+                cloudApp = cloudDb = null;
+                cloudSetStatus('Đã lưu Firebase config trong trình duyệt này. Bấm “☁️ Tạo/Bật link” để dùng.', 'online');
+            } catch (err) {
+                alert('Firebase config chưa đúng JSON hoặc thiếu thông tin: ' + (err.message || err));
+            }
+        }
+
+        function stopCloudRealtimeSync(clearUrl = false) {
+            if (cloudSaveTimeout) clearTimeout(cloudSaveTimeout);
+            cloudSaveTimeout = null;
+            if (cloudRef) {
+                try { cloudRef.off(); } catch (_) {}
+            }
+            cloudRef = null;
+            cloudShareId = null;
+            if (clearUrl) cloudReplaceUrlExamId('');
+            updateCloudSyncUI();
+            cloudSetStatus('Đã tắt Cloud Sync. Đề hiện chỉ tự lưu trong máy này.', '');
+        }
+
+        function bootCloudSyncFromUrl() {
+            updateCloudSyncUI();
+            const roomId = cloudGetExamIdFromUrl();
+            if (roomId) startCloudRealtimeSync(roomId, { pushCurrent: false, silent: true });
+        }
+
 
         let currentTabFilter = 'all';
         let isTabGridMode = false;
@@ -7614,6 +8051,7 @@ ${getPlainTextForAI(opt)}`;
         
         function createNewExam() {
             showLoadingScreen('⏳ Đang tạo đề thi mới...', 600, () => {
+                if (!cloudApplyingRemote) stopCloudRealtimeSync(true);
                 examSections = [{ 
                     id: generateId(), parentType: "moji", type: "kanji_yomi", tabName: "問題１", 
                     title: "問題１ ＿＿＿の言葉の読み方として最もよいものを、１・２・３・４から一つ選びなさい。", 
@@ -7649,7 +8087,10 @@ ${getPlainTextForAI(opt)}`;
             const existingIndex = storage.findIndex(item => item.id === currentExamId);
             if (existingIndex !== -1) storage[existingIndex] = examData; else storage.push(examData);
             localStorage.setItem('examStorageJLPT_v8', JSON.stringify(storage));
-            renderStorageList(); 
+            renderStorageList();
+            if (!cloudShareId || !cloudRef) cloudSetStatus('Đã lưu trong máy này. Bật Cloud Sync nếu muốn người khác mở link cùng đề.', '');
+            if (!cloudApplyingRemote) cloudQueueSave(examData);
+            return examData;
         }
 
         window.addEventListener('beforeunload', () => { if (autoSaveTimeout) { clearTimeout(autoSaveTimeout); forceAutoSave(); } });
@@ -7757,6 +8198,9 @@ ${getPlainTextForAI(opt)}`;
         }
         
         function loadExamData(examData) { 
+            if (!cloudApplyingRemote && cloudShareId && examData && examData.id && examData.id !== cloudShareId) {
+                stopCloudRealtimeSync(true);
+            }
             examSections = migrateDataToV8(examData.data); 
             document.getElementById('filename-field').value = examData.filename; 
             mergedExamIds = examData.mergedSources || []; 
@@ -7765,6 +8209,7 @@ ${getPlainTextForAI(opt)}`;
             activeSectionIndex = examSections.length > 0 ? 0 : -1; 
             initApp(); 
             renderStorageList(); // Thêm dòng này để render kho đề ngay lập tức
+            updateCloudSyncUI();
         }
         
         function deleteExamById(id, event) {
@@ -9907,6 +10352,7 @@ ${getPlainTextForAI(opt)}`;
         if(savedExams.length > 0) { 
             savedExams.sort((a, b) => b.timestamp_ms - a.timestamp_ms); loadExamData(savedExams[0]); 
         } else { createNewExam(); }
+        bootCloudSyncFromUrl();
         
         function updateToolbarVisibility() {
             // Quét và cập nhật trạng thái của toàn bộ các thanh tiêu đề nội bộ đang có trên màn hình
