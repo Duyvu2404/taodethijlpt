@@ -1259,6 +1259,132 @@
         }
 
 
+
+        /* --- CHECKLIST SOÁT LỖI GÕ LẠI: CÂU HỎI / ĐÁP ÁN / GẠCH CHÂN / SAO / BÀI ĐỌC --- */
+        .question-block.check-ok {
+            border-color: #22c55e !important;
+            background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 58%) !important;
+            box-shadow: 0 8px 22px rgba(34, 197, 94, 0.12) !important;
+        }
+        .question-block.check-bad {
+            border-color: #ef4444 !important;
+            background: linear-gradient(180deg, #fef2f2 0%, #ffffff 58%) !important;
+            box-shadow: 0 8px 22px rgba(239, 68, 68, 0.12) !important;
+        }
+        .question-block.check-pending {
+            border-color: #f59e0b;
+            background: linear-gradient(180deg, #fffbeb 0%, #ffffff 58%);
+        }
+        .question-block.check-ok .prefix-label { background: #dcfce7; color: #166534; }
+        .question-block.check-bad .prefix-label { background: #fee2e2; color: #991b1b; }
+        .question-checklist-panel {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            padding: 10px 12px;
+            margin: -2px 0 12px 0;
+            border: 1px solid #dbeafe;
+            border-radius: 12px;
+            background: linear-gradient(90deg, #f8fafc, #eff6ff);
+        }
+        .question-checklist-title {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            font-weight: 900;
+            color: #1e3a8a;
+            white-space: nowrap;
+            margin-right: 2px;
+        }
+        .question-check-summary {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 9px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 900;
+            border: 1px solid #cbd5e1;
+            background: #ffffff;
+            color: #475569;
+            white-space: nowrap;
+        }
+        .question-check-summary.ok { color: #166534; background: #dcfce7; border-color: #86efac; }
+        .question-check-summary.bad { color: #991b1b; background: #fee2e2; border-color: #fecaca; }
+        .question-check-summary.pending { color: #92400e; background: #fef3c7; border-color: #fde68a; }
+        .check-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 6px 5px 9px;
+            border-radius: 999px;
+            border: 1px solid #e2e8f0;
+            background: #ffffff;
+            box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+            transition: 0.18s ease;
+        }
+        .check-item-label {
+            font-size: 11px;
+            font-weight: 900;
+            color: #475569;
+            white-space: nowrap;
+        }
+        .check-item.ok { border-color: #86efac; background: #f0fdf4; }
+        .check-item.ok .check-item-label { color: #166534; }
+        .check-item.bad { border-color: #fecaca; background: #fef2f2; }
+        .check-item.bad .check-item-label { color: #991b1b; }
+        .check-mini-btn {
+            width: 23px;
+            height: 23px;
+            border-radius: 50%;
+            border: 1px solid #cbd5e1;
+            background: #f8fafc;
+            color: #64748b;
+            font-size: 12px;
+            line-height: 1;
+            font-weight: 900;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: 0.18s ease;
+        }
+        .check-mini-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12);
+        }
+        .check-mini-btn.ok:hover,
+        .check-mini-btn.ok.active { background: #22c55e; border-color: #16a34a; color: #ffffff; }
+        .check-mini-btn.bad:hover,
+        .check-mini-btn.bad.active { background: #ef4444; border-color: #dc2626; color: #ffffff; }
+        .passage-checkline {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 9px 10px;
+            background: linear-gradient(90deg, #f8fafc, #eef2ff);
+            border-bottom: 1px solid #cbd5e1;
+            flex-wrap: wrap;
+        }
+        .passage-checkline .passage-check-title {
+            font-size: 12px;
+            font-weight: 900;
+            color: #334155;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .passage-checkline.ok { background: linear-gradient(90deg, #dcfce7, #f0fdf4); border-bottom-color: #86efac; }
+        .passage-checkline.bad { background: linear-gradient(90deg, #fee2e2, #fff7ed); border-bottom-color: #fecaca; }
+        .dokkai-editor-wrapper.passage-ok { border-color: #22c55e !important; box-shadow: 0 8px 20px rgba(34, 197, 94, 0.10); }
+        .dokkai-editor-wrapper.passage-bad { border-color: #ef4444 !important; box-shadow: 0 8px 20px rgba(239, 68, 68, 0.10); }
+        .matrix-box.matrix-check-ok { background: #f0fdf4; border-color: #86efac; }
+        .matrix-box.matrix-check-bad { background: #fef2f2; border-color: #fecaca; }
+        .matrix-box.matrix-check-pending { background: #fffbeb; border-color: #fde68a; }
+
         /* --- THANH TÊN ĐỀ THI + FURIGANA/RUBY --- */
         .exam-title-banner {
             display: flex;
@@ -5271,6 +5397,7 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
             }
             if (typeof q.explanation === 'undefined' || q.explanation === null) q.explanation = '';
             if (typeof q.note === 'undefined' || q.note === null) q.note = '';
+            ensureQuestionChecklistFields(q);
             return q;
         }
 
@@ -5612,8 +5739,210 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
             renderMatrixSidebar(); // Cập nhật lại UI ngay lập tức
         }
         function generateId() { return Math.random().toString(36).substr(2, 9); }
-        function getEmptyQuestion() { return { id: 0, text: "", image: "", underline: "", starPosition: "", explanation: "", note: "", options: ["", "", "", ""], correct: "" }; }
-        function getEmptyGroup() { return { passageHTML: "", questions: [getEmptyQuestion()] }; }
+        function getEmptyQuestion() { return { id: 0, text: "", image: "", underline: "", starPosition: "", explanation: "", note: "", options: ["", "", "", ""], correct: "", checklist: { question: "", opt0: "", opt1: "", opt2: "", opt3: "", underline: "", star: "" } }; }
+        function getEmptyGroup() { return { passageHTML: "", checklist: { passage: "" }, questions: [getEmptyQuestion()] }; }
+
+        function normalizeChecklistStatus(value) {
+            if (value === true || value === 'true' || value === 'ok' || value === 'correct' || value === '✓') return 'ok';
+            if (value === false || value === 'false' || value === 'bad' || value === 'wrong' || value === 'x' || value === '✕') return 'bad';
+            return '';
+        }
+
+        function ensureQuestionChecklistFields(q) {
+            if (!q) return q;
+            if (!q.checklist || typeof q.checklist !== 'object' || Array.isArray(q.checklist)) q.checklist = {};
+            ['question', 'opt0', 'opt1', 'opt2', 'opt3', 'underline', 'star'].forEach(key => {
+                q.checklist[key] = normalizeChecklistStatus(q.checklist[key]);
+            });
+            return q;
+        }
+
+        function ensureGroupChecklistFields(group) {
+            if (!group) return group;
+            if (!group.checklist || typeof group.checklist !== 'object' || Array.isArray(group.checklist)) group.checklist = {};
+            group.checklist.passage = normalizeChecklistStatus(group.checklist.passage);
+            return group;
+        }
+
+        function getQuestionChecklistItems(sec) {
+            const items = [
+                { key: 'question', label: 'Câu hỏi' },
+                { key: 'opt0', label: 'A' },
+                { key: 'opt1', label: 'B' },
+                { key: 'opt2', label: 'C' },
+                { key: 'opt3', label: 'D' }
+            ];
+            if (sec?.features?.hasUnderline) items.push({ key: 'underline', label: 'In đậm / gạch chân' });
+            if (sec?.features?.hasStar) items.push({ key: 'star', label: 'Vị trí ★' });
+            return items;
+        }
+
+        function getQuestionCheckSummary(q, sec) {
+            ensureQuestionChecklistFields(q);
+            const items = getQuestionChecklistItems(sec);
+            const total = items.length;
+            let ok = 0, bad = 0, pending = 0;
+            items.forEach(item => {
+                const status = normalizeChecklistStatus(q?.checklist?.[item.key]);
+                if (status === 'ok') ok++;
+                else if (status === 'bad') bad++;
+                else pending++;
+            });
+            let status = '';
+            if (total > 0 && ok === total) status = 'ok';
+            else if (bad > 0) status = 'bad';
+            else if (ok > 0 || pending < total) status = 'pending';
+            return { total, ok, bad, pending, status };
+        }
+
+        function getQuestionCheckClass(q, sec) {
+            const summary = getQuestionCheckSummary(q, sec);
+            if (summary.status === 'ok') return 'check-ok';
+            if (summary.status === 'bad') return 'check-bad';
+            if (summary.status === 'pending') return 'check-pending';
+            return '';
+        }
+
+        function getQuestionMatrixCheckClass(q, sec) {
+            const summary = getQuestionCheckSummary(q, sec);
+            if (summary.status === 'ok') return 'matrix-check-ok';
+            if (summary.status === 'bad') return 'matrix-check-bad';
+            if (summary.status === 'pending') return 'matrix-check-pending';
+            return '';
+        }
+
+        function getQuestionCheckMiniIcon(q, sec) {
+            const summary = getQuestionCheckSummary(q, sec);
+            if (summary.status === 'ok') return '✅';
+            if (summary.status === 'bad') return '❌';
+            if (summary.status === 'pending') return '🟡';
+            return '';
+        }
+
+        function getQuestionCheckSummaryLabel(summary) {
+            if (summary.status === 'ok') return `✅ Đúng hết ${summary.ok}/${summary.total}`;
+            if (summary.status === 'bad') return `❌ Có lỗi ${summary.bad} ô`;
+            if (summary.status === 'pending') return `🟡 Đã check ${summary.ok}/${summary.total}`;
+            return `☐ Chưa check 0/${summary.total}`;
+        }
+
+        function renderCheckButtons(sIdx, gIdx, qIdx, key, status) {
+            const okActive = status === 'ok' ? 'active' : '';
+            const badActive = status === 'bad' ? 'active' : '';
+            return `
+                <button type="button" tabindex="-1" class="check-mini-btn ok ${okActive}" title="Đúng" onclick="setQuestionCheckStatus(${sIdx}, ${gIdx}, ${qIdx}, '${key}', 'ok', event)">✓</button>
+                <button type="button" tabindex="-1" class="check-mini-btn bad ${badActive}" title="Sai" onclick="setQuestionCheckStatus(${sIdx}, ${gIdx}, ${qIdx}, '${key}', 'bad', event)">✕</button>
+            `;
+        }
+
+        function renderQuestionChecklistHtml(sec, q, sIdx, gIdx, qIdx) {
+            ensureQuestionChecklistFields(q);
+            const summary = getQuestionCheckSummary(q, sec);
+            const itemsHtml = getQuestionChecklistItems(sec).map(item => {
+                const status = normalizeChecklistStatus(q.checklist[item.key]);
+                return `
+                    <span class="check-item ${status}" data-check-key="${item.key}">
+                        <span class="check-item-label">${item.label}</span>
+                        ${renderCheckButtons(sIdx, gIdx, qIdx, item.key, status)}
+                    </span>
+                `;
+            }).join('');
+            return `
+                <div class="question-checklist-panel" data-check-panel="question">
+                    <span class="question-checklist-title">🧾 Checklist gõ lại</span>
+                    <span class="question-check-summary ${summary.status}">${getQuestionCheckSummaryLabel(summary)}</span>
+                    ${itemsHtml}
+                </div>
+            `;
+        }
+
+        function setQuestionCheckStatus(sIdx, gIdx, qIdx, key, status, event) {
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            const sec = examSections?.[sIdx];
+            const q = sec?.groups?.[gIdx]?.questions?.[qIdx];
+            if (!q) return;
+            ensureQuestionChecklistFields(q);
+            const nextStatus = normalizeChecklistStatus(status);
+            q.checklist[key] = q.checklist[key] === nextStatus ? '' : nextStatus;
+            refreshQuestionCheckUI(sIdx, gIdx, qIdx);
+            autoSave();
+        }
+
+        function refreshQuestionCheckUI(sIdx, gIdx, qIdx) {
+            const sec = examSections?.[sIdx];
+            const q = sec?.groups?.[gIdx]?.questions?.[qIdx];
+            if (!sec || !q) return;
+            const block = document.querySelector(`.question-block[data-s-idx="${sIdx}"][data-g-idx="${gIdx}"][data-q-idx="${qIdx}"]`);
+            if (block) {
+                block.classList.remove('check-ok', 'check-bad', 'check-pending');
+                const cls = getQuestionCheckClass(q, sec);
+                if (cls) block.classList.add(cls);
+                const panel = block.querySelector('[data-check-panel="question"]');
+                if (panel) panel.outerHTML = renderQuestionChecklistHtml(sec, q, sIdx, gIdx, qIdx);
+            }
+            const matrixBox = document.querySelector(`.matrix-box [data-s="${sIdx}"][data-g="${gIdx}"][data-q="${qIdx}"]`)?.closest('.matrix-box');
+            if (matrixBox) {
+                matrixBox.classList.remove('matrix-check-ok', 'matrix-check-bad', 'matrix-check-pending');
+                const mCls = getQuestionMatrixCheckClass(q, sec);
+                if (mCls) matrixBox.classList.add(mCls);
+                const label = matrixBox.querySelector('.matrix-question-label');
+                if (label) {
+                    const icon = getQuestionCheckMiniIcon(q, sec);
+                    label.textContent = `${icon ? icon + ' ' : ''}CÂU ${q.id}`;
+                }
+            }
+        }
+
+        function getPassageCheckStatus(group) {
+            ensureGroupChecklistFields(group);
+            return normalizeChecklistStatus(group?.checklist?.passage);
+        }
+
+        function renderPassageChecklistHtml(group, sIdx, gIdx) {
+            const status = getPassageCheckStatus(group);
+            return `
+                <div class="passage-checkline ${status}">
+                    <span class="passage-check-title">📖 Checklist bài đọc / đoạn văn</span>
+                    <span class="check-item ${status}" data-check-key="passage">
+                        <span class="check-item-label">${status === 'ok' ? 'Đã soát đúng' : status === 'bad' ? 'Có lỗi cần sửa' : 'Chưa check'}</span>
+                        <button type="button" tabindex="-1" class="check-mini-btn ok ${status === 'ok' ? 'active' : ''}" title="Bài đọc đúng" onclick="setPassageCheckStatus(${sIdx}, ${gIdx}, 'ok', event)">✓</button>
+                        <button type="button" tabindex="-1" class="check-mini-btn bad ${status === 'bad' ? 'active' : ''}" title="Bài đọc sai" onclick="setPassageCheckStatus(${sIdx}, ${gIdx}, 'bad', event)">✕</button>
+                    </span>
+                </div>
+            `;
+        }
+
+        function setPassageCheckStatus(sIdx, gIdx, status, event) {
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            const group = examSections?.[sIdx]?.groups?.[gIdx];
+            if (!group) return;
+            ensureGroupChecklistFields(group);
+            const nextStatus = normalizeChecklistStatus(status);
+            group.checklist.passage = group.checklist.passage === nextStatus ? '' : nextStatus;
+            refreshPassageCheckUI(sIdx, gIdx);
+            autoSave();
+        }
+
+        function refreshPassageCheckUI(sIdx, gIdx) {
+            const group = examSections?.[sIdx]?.groups?.[gIdx];
+            if (!group) return;
+            const editor = document.querySelector(`#section-wrapper-${sIdx} #dokkai-passage-${gIdx}`);
+            const wrapper = editor?.closest?.('.dokkai-editor-wrapper');
+            if (wrapper) {
+                wrapper.classList.remove('passage-ok', 'passage-bad');
+                const status = getPassageCheckStatus(group);
+                if (status === 'ok') wrapper.classList.add('passage-ok');
+                if (status === 'bad') wrapper.classList.add('passage-bad');
+                const line = wrapper.querySelector('.passage-checkline');
+                if (line) line.outerHTML = renderPassageChecklistHtml(group, sIdx, gIdx);
+            }
+        }
         const DOKKAI_PLACEHOLDER_TEXT = "Nhập đoạn văn cho nhóm câu hỏi này...";
         function removeRTETextboxesFromHtml(html) {
             const holder = document.createElement('div');
@@ -5628,7 +5957,10 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
         }
 
         function initApp() {
-            examSections.forEach(sec => (sec.groups || []).forEach(group => (group.questions || []).forEach(q => ensureQuestionExplanationFields(q))));
+            examSections.forEach(sec => (sec.groups || []).forEach(group => {
+                ensureGroupChecklistFields(group);
+                (group.questions || []).forEach(q => ensureQuestionExplanationFields(q));
+            }));
             reindexAllMondai(); // Chạy cập nhật Mondai trước tiên
             reindexAllQuestions(); // Chạy cập nhật Câu hỏi
             refreshAllPassageBlankLabelsInData(); // Cập nhật số ô trống trong đoạn văn theo mã câu hỏi hiện tại
@@ -6249,13 +6581,16 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
                 sectionWrapper.innerHTML += htmlContent;
 
                 sec.groups.forEach((group, gIdx) => {
+                    ensureGroupChecklistFields(group);
                     const groupBlock = document.createElement('div');
                     groupBlock.className = `group-block ${sec.features.isGrouped ? 'is-grouped' : ''}`;
-                    
+                    const passageStatus = getPassageCheckStatus(group);
+                    const passageCheckWrapperClass = passageStatus === 'ok' ? 'passage-ok' : passageStatus === 'bad' ? 'passage-bad' : '';
+
                     if (sec.features.isGrouped) {
                         groupBlock.innerHTML += `
                             <button class="btn-delete-group" onclick="deleteGroup(${gIdx})">Xóa Bài Đọc Này</button>
-                            <div class="dokkai-editor-wrapper">
+                            <div class="dokkai-editor-wrapper ${passageCheckWrapperClass}">
                                 <div class="dokkai-toolbar">
                                     <select title="Font chữ (Alt+F)" onchange="applyRTEFontName(${gIdx}, this.value)">
                                         <option value="Noto Sans JP">Noto JP</option>
@@ -6339,6 +6674,7 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
                                     <span>Nền</span><input type="color" value="#ffffff" oninput="applySelectedObjectStyle(${gIdx}, 'backgroundColor', this.value)">
                                     <button type="button" onclick="deleteSelectedRTEObject(${gIdx})">Xóa bảng</button>
                                 </div>
+                                ${renderPassageChecklistHtml(group, actualSectionIndex, gIdx)}
                             <div class="dokkai-content" id="dokkai-passage-${gIdx}" contenteditable="true" data-g-idx="${gIdx}" placeholder="Nhập đoạn văn cho nhóm câu hỏi này..." oninput="syncPassage(${gIdx})" onkeydown="handlePassageKeydown(event, this, ${gIdx})" ondblclick="handlePassageBlankDblClick(event, ${gIdx})" onclick="handleRTEObjectClick(event, ${gIdx})" onpaste="handleDokkaiPaste(event, ${gIdx})">${getFuriganaDisplayHtml(refreshPassageBlankLabels(isOnlyDokkaiPlaceholderHtml(group.passageHTML) ? '' : (group.passageHTML || ''), group))}</div>                            </div>
                         `;
                     }
@@ -6347,7 +6683,8 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
                         ensureQuestionExplanationFields(q);
                         const block = document.createElement('div');
                         const isFocus = globalActiveFocus && globalActiveFocus.sIdx === actualSectionIndex && globalActiveFocus.gIdx === gIdx && globalActiveFocus.qIdx === qIdx;
-                        block.className = `question-block ${isFocus ? 'active-focus' : ''}`;
+                        const qCheckClass = getQuestionCheckClass(q, sec);
+                        block.className = `question-block ${qCheckClass} ${isFocus ? 'active-focus' : ''}`;
                         block.id = `question-block-g${gIdx}-q${qIdx}`;
                         block.setAttribute('onmousedown', `clearFocusIfActive(${actualSectionIndex}, ${gIdx}, ${qIdx}, this)`);
                         block.setAttribute('data-s-idx', actualSectionIndex);
@@ -6386,6 +6723,7 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
                                 ${starInputHtml}
                                 ${underlineInputHtml}
                             </div>
+                            ${renderQuestionChecklistHtml(sec, q, actualSectionIndex, gIdx, qIdx)}
                             <div class="question-explanation-grid ${q.explainState === 'visible' ? 'manual-toggle-show' : q.explainState === 'hidden' ? 'manual-toggle-hide' : ''}">
                                 <div class="explain-field-wrap vocab-wrap">
                                     <div class="explain-field-label">
@@ -9235,7 +9573,8 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
                     g.questions.forEach((q, qIdx) => {
                         const box = document.createElement('div'); 
                         const isFocus = globalActiveFocus && globalActiveFocus.sIdx === sIdx && globalActiveFocus.gIdx === gIdx && globalActiveFocus.qIdx === qIdx;
-                        box.className = `matrix-box ${isFocus ? 'active-focus' : ''}`;
+                        const matrixCheckClass = getQuestionMatrixCheckClass(q, sec);
+                        box.className = `matrix-box ${matrixCheckClass} ${isFocus ? 'active-focus' : ''}`;
                         
                         // Đổi màu viền nhẹ để phân biệt các câu hỏi của Tab đang mở
                         if (isCurrentActive && !isMatrixExpandedAll) {
@@ -9246,7 +9585,7 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
                         box.setAttribute('onclick', `if(event.target.tagName !== 'INPUT') scrollToQuestion(${sIdx}, ${gIdx}, ${qIdx})`);
 
                         box.innerHTML = `
-                            <span>CÂU ${q.id}</span>
+                            <span class="matrix-question-label">${getQuestionCheckMiniIcon(q, sec) ? getQuestionCheckMiniIcon(q, sec) + ' ' : ''}CÂU ${q.id}</span>
                             <input type="text" class="ans-input" maxlength="1" 
                                 id="matrix-input-${flatIndex}" data-index="${flatIndex}"
                                 data-s="${sIdx}" data-g="${gIdx}" data-q="${qIdx}" 
@@ -9344,6 +9683,7 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
             data.forEach(sec => {
                 if (!sec.groups) { sec.groups = [{ passageHTML: sec.passageHTML || "", questions: sec.questions || [] }]; delete sec.passageHTML; delete sec.questions; }
                 (sec.groups || []).forEach(group => {
+                    ensureGroupChecklistFields(group);
                     if (group.passageHTML) group.passageHTML = removeRTETextboxesFromHtml(group.passageHTML);
                     (group.questions || []).forEach(q => ensureQuestionExplanationFields(q));
                 });
