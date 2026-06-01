@@ -3744,6 +3744,14 @@ ${getPlainTextForAI(opt)}`;
             }
             return id;
         })();
+
+        // FIX 2026-06-01: mỗi tab/cửa sổ có một mã writer riêng.
+        // Trước đây admin và link người truy cập mở cùng trình duyệt sẽ dùng chung cloudClientId trong localStorage,
+        // nên admin tưởng bản sửa từ link truy cập là bản do chính mình vừa ghi và bỏ qua realtime update.
+        const cloudPageInstanceId = cloudClientId + '_tab_' + Math.random().toString(36).slice(2, 9) + '_' + Date.now().toString(36);
+        function cloudIsOwnRealtimeWrite(writerId) {
+            return String(writerId || '') === cloudPageInstanceId;
+        }
         let cloudApp = null;
         let cloudDb = null;
         let cloudRef = null;
@@ -3760,6 +3768,53 @@ ${getPlainTextForAI(opt)}`;
         let cloudLastEncryptedPayloadSig = '';
         let cloudRoomIsEncrypted = false;
         let isCloudShareFeatureEnabled = localStorage.getItem(CLOUD_SHARE_FEATURE_KEY) !== 'false';
+
+
+        // FIX 2026-06-01 FULL DUPLEX: đánh dấu rõ từng lần ghi cloud để admin <-> link truy cập tự nhận bản mới hai chiều.
+        // - updatedBy dùng mã riêng của từng tab/cửa sổ, không dùng chung localStorage.
+        // - fingerprint giúp nhận biết gói dữ liệu đã gửi/đã nhận, tránh vòng lặp tự đẩy ngược lại liên tục.
+        let cloudLastLocalPayloadFingerprint = '';
+        let cloudLastRemotePayloadFingerprint = '';
+        let cloudLastRemoteSecurityFingerprint = '';
+
+        function cloudFingerprintValue(value) {
+            try {
+                return btoa(unescape(encodeURIComponent(JSON.stringify(value || null)))).slice(0, 180);
+            } catch (_) {
+                return String(value || '').slice(0, 180);
+            }
+        }
+
+        function cloudGetRemotePayloadFingerprint(val) {
+            if (!val) return '';
+            if (val._sync && val._sync.payloadFingerprint) return String(val._sync.payloadFingerprint);
+            if (val._payloadEncrypted) {
+                return String(val._payloadEncrypted.data || '').slice(0, 96) + '::' + String(val._payloadEncrypted.iv || '');
+            }
+            return cloudFingerprintValue({
+                id: val.id,
+                filename: val.filename,
+                timestamp_ms: val.timestamp_ms,
+                data: val.data,
+                mergedSources: val.mergedSources
+            });
+        }
+
+        function cloudGetRemoteSecurityFingerprint(val) {
+            return cloudFingerprintValue((val && val._security) || null);
+        }
+
+        function cloudGetWriterRole() {
+            return (typeof cloudIsShareVisitor === 'function' && cloudIsShareVisitor()) ? 'share-editor' : 'admin';
+        }
+
+        function cloudGetWriterLabel(val) {
+            const role = val && val._sync && val._sync.writerRole;
+            if (role === 'admin') return 'admin';
+            if (role === 'share-editor') return 'link truy cập';
+            if (cloudIsOwnRealtimeWrite(val && val.updatedBy)) return 'trình duyệt này';
+            return 'thiết bị khác';
+        }
 
         function escapeHtml(value) {
             return String(value || '')
@@ -4088,6 +4143,11 @@ ${getPlainTextForAI(opt)}`;
                 adminSalt,
                 adminHash,
                 editLocked: false,
+                // FIX 2026-06-01: lưu rõ trạng thái link/cloud ngay trong Firebase.
+                // Nếu không có 3 cờ này, sau khi admin reload trạng thái chỉ còn phụ thuộc fallback trên máy.
+                cloudEnabled: true,
+                shareEnabled: true,
+                revoked: false,
                 revision: Date.now(),
                 createdAt: Date.now(),
                 updatedAt: Date.now()
@@ -4411,13 +4471,25 @@ ${getPlainTextForAI(opt)}`;
             snapshot.date = new Date().toLocaleString('vi-VN');
 
             const encryptedPayload = await cloudEncryptSnapshotPayload(snapshot);
+            const payloadFingerprint = String(encryptedPayload.data || '').slice(0, 96) + '::' + String(encryptedPayload.iv || '');
+            const syncRevision = Date.now();
             const payload = {
                 id: snapshot.id,
                 filename: '🔐 Đề đã khóa',
                 date: snapshot.date,
                 timestamp_ms: snapshot.timestamp_ms,
-                updatedBy: cloudClientId,
+                updatedBy: cloudPageInstanceId,
+                updatedByClient: cloudClientId,
                 updatedAt: firebase.database.ServerValue.TIMESTAMP,
+                _sync: {
+                    mode: 'full-duplex-v2',
+                    writerRole: cloudGetWriterRole(),
+                    writerTab: cloudPageInstanceId,
+                    writerClient: cloudClientId,
+                    payloadFingerprint,
+                    revision: syncRevision,
+                    localTime: syncRevision
+                },
                 _security: {
                     ...cloudRoomSecurity,
                     version: CLOUD_SECURITY_VERSION,
@@ -4426,6 +4498,7 @@ ${getPlainTextForAI(opt)}`;
                 },
                 _payloadEncrypted: encryptedPayload
             };
+            cloudLastLocalPayloadFingerprint = payloadFingerprint;
             cloudRoomSecurity = payload._security;
             cloudRoomIsEncrypted = true;
             cloudReadOnlyMode = false;
@@ -4518,14 +4591,34 @@ ${getPlainTextForAI(opt)}`;
                 cloudApplySecurityFromRemote(val, roomId);
 
                 const incomingUpdatedAt = Number(val.updatedAt || 0);
-                if (val.updatedBy === cloudClientId && Date.now() - cloudLastLocalWriteAt < 6000) {
+                const incomingPayloadFingerprint = cloudGetRemotePayloadFingerprint(val);
+                const incomingSecurityFingerprint = cloudGetRemoteSecurityFingerprint(val);
+                const sameAsAlreadyApplied = incomingPayloadFingerprint
+                    && incomingPayloadFingerprint === cloudLastRemotePayloadFingerprint
+                    && incomingSecurityFingerprint === cloudLastRemoteSecurityFingerprint;
+
+                // FULL DUPLEX: chỉ bỏ qua bản do CHÍNH TAB NÀY vừa ghi xong.
+                // Bản từ admin/link truy cập/tab khác luôn được nạp về, kể cả cùng một trình duyệt.
+                if (cloudIsOwnRealtimeWrite(val.updatedBy)
+                    && Date.now() - cloudLastLocalWriteAt < 6000
+                    && (!incomingPayloadFingerprint || incomingPayloadFingerprint === cloudLastLocalPayloadFingerprint)) {
                     cloudLastRemoteTimestamp = Math.max(cloudLastRemoteTimestamp, incomingUpdatedAt || Date.now());
-                    cloudSetStatus('✅ Đã lưu cloud bằng dữ liệu mã hóa. Người khác cần mật khẩu mở đề mới xem được.', 'online');
+                    cloudLastRemotePayloadFingerprint = incomingPayloadFingerprint || cloudLastRemotePayloadFingerprint;
+                    cloudLastRemoteSecurityFingerprint = incomingSecurityFingerprint || cloudLastRemoteSecurityFingerprint;
+                    cloudSetStatus('✅ Đã lưu cloud. Admin và link truy cập đang đồng bộ hai chiều.', 'online');
                     updateCloudSyncUI();
                     return;
                 }
-                if (incomingUpdatedAt && incomingUpdatedAt < cloudLastRemoteTimestamp) return;
+                if (sameAsAlreadyApplied) {
+                    cloudSetStatus('✅ Dữ liệu cloud đã là bản mới nhất trên trang này.', 'online');
+                    updateCloudSyncUI();
+                    return;
+                }
+                if (incomingUpdatedAt && incomingUpdatedAt < cloudLastRemoteTimestamp && !incomingPayloadFingerprint) return;
                 cloudLastRemoteTimestamp = incomingUpdatedAt || Date.now();
+                cloudLastRemotePayloadFingerprint = incomingPayloadFingerprint || cloudLastRemotePayloadFingerprint;
+                cloudLastRemoteSecurityFingerprint = incomingSecurityFingerprint || cloudLastRemoteSecurityFingerprint;
+                const incomingWriterLabel = cloudGetWriterLabel(val);
 
                 try {
                     cloudApplyingRemote = true;
@@ -11618,8 +11711,19 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
             try {
                 await cloudRef.update({
                     _security: nextSecurity,
-                    updatedBy: cloudClientId,
-                    updatedAt: firebase.database.ServerValue.TIMESTAMP
+                    updatedBy: cloudPageInstanceId,
+                    updatedByClient: cloudClientId,
+                    updatedAt: firebase.database.ServerValue.TIMESTAMP,
+                    _sync: {
+                        mode: 'full-duplex-v2',
+                        writerRole: cloudGetWriterRole(),
+                        writerTab: cloudPageInstanceId,
+                        writerClient: cloudClientId,
+                        payloadFingerprint: cloudLastLocalPayloadFingerprint || '',
+                        revision: Date.now(),
+                        localTime: Date.now(),
+                        securityOnly: true
+                    }
                 });
                 updateCloudSyncUI();
                 return true;
@@ -11645,13 +11749,25 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
             snapshot.timestamp_ms = Date.now();
             snapshot.date = new Date().toLocaleString('vi-VN');
             const encryptedPayload = await cloudEncryptSnapshotPayload(snapshot);
+            const payloadFingerprint = String(encryptedPayload.data || '').slice(0, 96) + '::' + String(encryptedPayload.iv || '');
+            const syncRevision = Date.now();
             const payload = {
                 id: snapshot.id,
                 filename: '🔐 Đề đã khóa',
                 date: snapshot.date,
                 timestamp_ms: snapshot.timestamp_ms,
-                updatedBy: cloudClientId,
+                updatedBy: cloudPageInstanceId,
+                updatedByClient: cloudClientId,
                 updatedAt: firebase.database.ServerValue.TIMESTAMP,
+                _sync: {
+                    mode: 'full-duplex-v2',
+                    writerRole: cloudGetWriterRole(),
+                    writerTab: cloudPageInstanceId,
+                    writerClient: cloudClientId,
+                    payloadFingerprint,
+                    revision: syncRevision,
+                    localTime: syncRevision
+                },
                 _security: {
                     ...cloudRoomSecurity,
                     version: CLOUD_SECURITY_VERSION,
@@ -11660,6 +11776,7 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
                 },
                 _payloadEncrypted: encryptedPayload
             };
+            cloudLastLocalPayloadFingerprint = payloadFingerprint;
             cloudLastLocalWriteAt = Date.now();
             cloudRoomSecurity = payload._security;
             cloudRoomIsEncrypted = true;
@@ -11717,7 +11834,7 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
                     '_security/shareEnabled': false,
                     '_security/replacedAt': Date.now(),
                     '_security/revision': Date.now(),
-                    updatedBy: cloudClientId,
+                    updatedBy: cloudPageInstanceId,
                     updatedAt: firebase.database.ServerValue.TIMESTAMP
                 });
                 try { oldRef.off(); } catch (_) {}
@@ -12436,6 +12553,152 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
 
         cloudInstallDevToolsBlocker();
         if (cloudIsShareVisitor()) cloudPrepareShareAccessUI();
+
+        // ==========================================
+        // FIX 2026-06-01: Giữ trạng thái Cloud của ADMIN sau khi reload/tắt máy.
+        // - Admin đang dùng URL gốc nên không có ?exam=...
+        // - Bản cũ chỉ bootCloudSyncFromUrl() khi thấy ?exam, vì vậy reload xong UI tưởng Cloud đã ngắt.
+        // - Bản này lưu mã phòng cloud admin đang mở, khôi phục lại listener Firebase khi tải trang,
+        //   và không tự đổi trạng thái cloudEnabled/shareEnabled trên Firebase nếu admin không bấm.
+        // ==========================================
+        const CLOUD_SYNC_ADMIN_ACTIVE_ROOM_KEY = 'jlpt_cloud_admin_active_room_id_v2';
+        const CLOUD_SYNC_ADMIN_ROOM_SECURITY_PREFIX = 'jlpt_cloud_admin_room_security_v2_';
+
+        function cloudAdminRoomStateKey(roomId = cloudShareId) {
+            return CLOUD_SYNC_ADMIN_ROOM_SECURITY_PREFIX + cloudSanitizeExamId(roomId || '');
+        }
+
+        function cloudPersistAdminRoomState(roomId = cloudShareId, security = cloudRoomSecurity) {
+            if (typeof cloudIsShareVisitor === 'function' && cloudIsShareVisitor()) return;
+            const safeRoomId = cloudSanitizeExamId(roomId || '');
+            if (!safeRoomId) return;
+            try {
+                localStorage.setItem(CLOUD_SYNC_LAST_EXAM_KEY, safeRoomId);
+                localStorage.setItem(CLOUD_SYNC_ADMIN_ACTIVE_ROOM_KEY, safeRoomId);
+                if (security && typeof security === 'object') {
+                    localStorage.setItem(cloudAdminRoomStateKey(safeRoomId), JSON.stringify({
+                        cloudEnabled: security.cloudEnabled !== false,
+                        shareEnabled: security.shareEnabled !== false,
+                        revoked: Boolean(security.revoked),
+                        editLocked: Boolean(security.editLocked),
+                        encrypted: Boolean(security.encrypted),
+                        revision: Number(security.revision || 0),
+                        updatedAt: Number(security.updatedAt || Date.now())
+                    }));
+                }
+            } catch (_) {}
+        }
+
+        function cloudGetCachedAdminRoomState(roomId) {
+            try {
+                const raw = localStorage.getItem(cloudAdminRoomStateKey(roomId));
+                return raw ? JSON.parse(raw) : null;
+            } catch (_) {
+                return null;
+            }
+        }
+
+        function cloudGetAdminRestoreRoomId() {
+            if (typeof cloudIsShareVisitor === 'function' && cloudIsShareVisitor()) return '';
+            const urlRoomId = cloudGetExamIdFromUrl();
+            if (urlRoomId) return urlRoomId;
+
+            const activeId = cloudSanitizeExamId(localStorage.getItem(CLOUD_SYNC_ADMIN_ACTIVE_ROOM_KEY) || '');
+            const lastId = cloudSanitizeExamId(localStorage.getItem(CLOUD_SYNC_LAST_EXAM_KEY) || '');
+            const currentId = cloudSanitizeExamId(currentExamId || '');
+
+            // Chỉ tự khôi phục khi đề local đang mở đúng với mã cloud gần nhất.
+            // Nhờ vậy nếu admin tạo đề mới offline, web không tự kéo nhầm link cloud cũ.
+            if (activeId && (!currentId || currentId === activeId)) return activeId;
+            if (lastId && (!currentId || currentId === lastId)) return lastId;
+            return '';
+        }
+
+        const cloudOriginalApplySecurityFromRemotePersistAdmin = cloudApplySecurityFromRemote;
+        cloudApplySecurityFromRemote = function(val, roomId) {
+            cloudOriginalApplySecurityFromRemotePersistAdmin(val, roomId);
+            cloudPersistAdminRoomState(roomId, cloudRoomSecurity);
+        };
+
+        const cloudOriginalUpdateSecurityPatchPersistAdmin = cloudUpdateSecurityPatch;
+        cloudUpdateSecurityPatch = async function(patch = {}, opts = {}) {
+            const ok = await cloudOriginalUpdateSecurityPatchPersistAdmin(patch, opts);
+            if (ok) cloudPersistAdminRoomState(cloudShareId, cloudRoomSecurity);
+            return ok;
+        };
+
+        const cloudOriginalStartRealtimeSyncPersistAdmin = startCloudRealtimeSync;
+        startCloudRealtimeSync = async function(id, options = {}) {
+            const beforeRoomId = cloudSanitizeExamId(id || cloudShareId || currentExamId || '');
+            const result = await cloudOriginalStartRealtimeSyncPersistAdmin(id, options);
+            const afterRoomId = cloudSanitizeExamId(cloudShareId || beforeRoomId || '');
+            if (!cloudIsShareVisitor() && afterRoomId) {
+                cloudPersistAdminRoomState(afterRoomId, cloudRoomSecurity);
+            }
+            return result;
+        };
+
+        bootCloudSyncFromUrl = function() {
+            updateCloudSyncUI();
+
+            if (!isCloudShareFeatureEnabled) {
+                cloudSetStatus('🔕 Share đề thi chung đang tắt. Đề hiện chỉ tự lưu riêng trong máy này.', '');
+                return;
+            }
+
+            const urlRoomId = cloudGetExamIdFromUrl();
+            const restoreRoomId = urlRoomId || cloudGetAdminRestoreRoomId();
+
+            if (!restoreRoomId) return;
+
+            if (!cloudIsShareVisitor()) {
+                const cachedState = cloudGetCachedAdminRoomState(restoreRoomId);
+                if (cachedState) {
+                    cloudRoomSecurity = {
+                        ...(cloudRoomSecurity || {}),
+                        ...cachedState
+                    };
+                    cloudRoomIsEncrypted = Boolean(cachedState.encrypted);
+                    updateCloudSyncUI();
+                }
+
+                if (!cloudFirebaseConfigLooksValid(getCloudFirebaseConfig())) {
+                    cloudSetStatus('⚙️ Đã nhớ mã cloud gần nhất nhưng máy này chưa có Firebase config. Bấm ⚙️ Firebase để dán config rồi web sẽ nối lại.', 'error');
+                    return;
+                }
+
+                cloudSetStatus('🔁 Đang khôi phục kết nối cloud đã lưu cho admin...', 'saving');
+            }
+
+            startCloudRealtimeSync(restoreRoomId, {
+                pushCurrent: false,
+                silent: true,
+                restoreSession: true
+            });
+        };
+
+
+        // FIX 2026-06-01 FULL DUPLEX AUTOSAVE BRIDGE:
+        // Một vài ô contenteditable/bảng/ô đáp án có thể không gọi autoSave đúng nhịp nếu DOM thay đổi sâu.
+        // Cầu nối này bắt mọi input thật trong khu vực đề, đợi handler gốc sync dữ liệu xong rồi tự xếp lịch đẩy cloud.
+        (function installCloudFullDuplexAutosaveBridge() {
+            if (window.__cloudFullDuplexAutosaveBridgeInstalled) return;
+            window.__cloudFullDuplexAutosaveBridgeInstalled = true;
+            document.addEventListener('input', function(event) {
+                if (!cloudShareId || !cloudRef || cloudApplyingRemote) return;
+                if (!cloudCanWriteToCurrentRoom()) return;
+                const target = event.target;
+                if (!target || (target.closest && (target.closest('#cloud-access-guard') || target.closest('#cloud-sync-panel')))) return;
+                const isEditorArea = target.closest && (target.closest('.main-content') || target.closest('#editor-container') || target.closest('#matrix-container'));
+                if (!isEditorArea) return;
+                setTimeout(() => {
+                    if (!cloudApplyingRemote && cloudShareId && cloudRef && cloudCanWriteToCurrentRoom()) {
+                        autoSave();
+                    }
+                }, 0);
+            }, false);
+        })();
+
 
         let savedExams = JSON.parse(localStorage.getItem('examStorageJLPT_v8')) || [];
         if (savedExams.length === 0) {
