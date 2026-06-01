@@ -1799,6 +1799,44 @@
         .cloud-lock-btn.secondary { background: #475569; }
         .cloud-lock-btn.danger { background: #dc2626; }
         .cloud-lock-error { min-height: 18px; margin-top: 10px; font-size: 12px; font-weight: 850; color: #dc2626; }
+        .cloud-password-field { position: relative; width: 100%; display: flex; align-items: center; }
+        .cloud-password-field .cloud-lock-input,
+        .cloud-edit-inline-box .cloud-password-field input { padding-right: 48px !important; }
+        .cloud-pass-eye {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 34px;
+            height: 34px;
+            border: 0;
+            border-radius: 10px;
+            background: rgba(37,99,235,0.10);
+            color: #1d4ed8;
+            font-size: 15px;
+            font-weight: 900;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2;
+        }
+        .cloud-pass-eye:hover { background: rgba(37,99,235,0.18); }
+        .cloud-pass-meter {
+            display: none;
+            width: 100%;
+            margin-top: 9px;
+            padding: 8px 9px;
+            border-radius: 12px;
+            background: #f8fafc;
+            border: 1px solid #dbeafe;
+            text-align: left;
+        }
+        .cloud-pass-meter.active { display: block; }
+        .cloud-pass-meter-track { height: 7px; border-radius: 999px; overflow: hidden; background: #e2e8f0; }
+        .cloud-pass-meter-fill { width: 0%; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #2563eb, #10b981); transition: width .09s linear; }
+        .cloud-pass-meter.error .cloud-pass-meter-fill { background: linear-gradient(90deg, #f59e0b, #ef4444); }
+        .cloud-pass-meter-label { margin-top: 5px; font-size: 11px; font-weight: 850; color: #475569; }
         .cloud-lock-footnote { margin-top: 14px; font-size: 11px; color: #64748b; line-height: 1.45; }
         body.cloud-share-readonly .btn-delete-neat,
         body.cloud-share-readonly .btn-insert-after,
@@ -1836,6 +1874,15 @@
             font-weight: 950;
             cursor: pointer;
         }
+        .cloud-edit-inline-box .cloud-pass-eye {
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            background: rgba(245,158,11,0.14);
+            color: #92400e;
+        }
+        .cloud-edit-inline-box .cloud-pass-eye:hover { background: rgba(245,158,11,0.24); }
+        .cloud-edit-inline-box .cloud-pass-meter { border-color: #fde68a; background: #fffbeb; }
         .cloud-edit-inline-note { font-size: 11px; color: #92400e; line-height: 1.45; font-weight: 750; }
 
     </style>
@@ -3733,6 +3780,8 @@ ${getPlainTextForAI(opt)}`;
         const CLOUD_SYNC_LAST_EXAM_KEY = 'jlpt_cloud_last_exam_id_v1';
         const CLOUD_SYNC_PASSWORD_CACHE_PREFIX = 'jlpt_cloud_edit_hash_';
         const CLOUD_SYNC_ADMIN_CACHE_PREFIX = 'jlpt_cloud_admin_hash_';
+        // FIX 2026-06-01: nhớ mật khẩu mở đề theo từng mã đề/revision để người truy cập reload vẫn vào lại đúng trạng thái.
+        const CLOUD_SYNC_VIEW_PASSWORD_CACHE_PREFIX = 'jlpt_cloud_view_password_v1_';
         const CLOUD_SYNC_PATH = 'sharedExams';
         const CLOUD_SECURITY_VERSION = 3;
         const cloudClientId = (() => {
@@ -3972,6 +4021,50 @@ ${getPlainTextForAI(opt)}`;
             localStorage.setItem(cloudCacheKey(CLOUD_SYNC_ADMIN_CACHE_PREFIX, roomId), hash);
         }
 
+        function cloudViewPasswordCacheKey(roomId = cloudShareId, security = cloudRoomSecurity) {
+            if (!roomId || !security || !security.viewHash) return '';
+            const rev = String(security.revision || security.updatedAt || '1');
+            return CLOUD_SYNC_VIEW_PASSWORD_CACHE_PREFIX + roomId + '_view_' + String(security.viewHash).slice(0, 18) + '_rev_' + rev;
+        }
+
+        function cloudGetCachedViewPassword(roomId = cloudShareId, security = cloudRoomSecurity) {
+            const key = cloudViewPasswordCacheKey(roomId, security);
+            if (!key) return '';
+            try { return localStorage.getItem(key) || ''; } catch (_) { return ''; }
+        }
+
+        function cloudSetCachedViewPassword(roomId = cloudShareId, security = cloudRoomSecurity, password = cloudViewPassword) {
+            const key = cloudViewPasswordCacheKey(roomId, security);
+            if (!key || !password) return;
+            try {
+                localStorage.setItem(key, String(password));
+                localStorage.setItem(CLOUD_SYNC_VIEW_PASSWORD_CACHE_PREFIX + String(roomId || '') + '_last', key);
+            } catch (_) {}
+        }
+
+        function cloudForgetCachedViewPassword(roomId = cloudShareId) {
+            if (!roomId) return;
+            try {
+                Object.keys(localStorage).forEach(k => {
+                    if (k.startsWith(CLOUD_SYNC_VIEW_PASSWORD_CACHE_PREFIX + roomId)) localStorage.removeItem(k);
+                });
+            } catch (_) {}
+        }
+
+        async function cloudTryUseCachedViewPassword(roomId = cloudShareId, security = cloudRoomSecurity) {
+            const cachedPw = cloudGetCachedViewPassword(roomId, security);
+            if (!cachedPw || !security || !security.viewHash || !security.viewSalt) return false;
+            try {
+                const hash = await cloudHashPassword(cachedPw, 'view', security.viewSalt);
+                if (hash === security.viewHash) {
+                    cloudViewPassword = cachedPw;
+                    return true;
+                }
+            } catch (_) {}
+            cloudForgetCachedViewPassword(roomId);
+            return false;
+        }
+
         function cloudClearCachedEditHash(roomId = cloudShareId) {
             if (!roomId) return;
             Object.keys(localStorage).forEach(k => {
@@ -4173,9 +4266,18 @@ ${getPlainTextForAI(opt)}`;
             if (cloudViewPassword) {
                 try {
                     const hash = await cloudHashPassword(cloudViewPassword, 'view', security.viewSalt);
-                    if (hash === security.viewHash) return true;
+                    if (hash === security.viewHash) {
+                        cloudSetCachedViewPassword(roomId, security, cloudViewPassword);
+                        return true;
+                    }
                 } catch (_) {}
                 cloudViewPassword = '';
+            }
+
+            if (await cloudTryUseCachedViewPassword(roomId, security)) {
+                cloudSetStatus('🔐 Đã tự khôi phục trạng thái mở đề sau khi reload.', 'online');
+                updateCloudSyncUI();
+                return true;
             }
 
             const pw = prompt('Đề cloud này đã khóa để chống trộm đề.\n\nNhập MẬT KHẨU MỞ ĐỀ để xem nội dung:');
@@ -4191,6 +4293,8 @@ ${getPlainTextForAI(opt)}`;
                 return false;
             }
             cloudViewPassword = pw;
+            cloudSetCachedViewPassword(roomId, security, pw);
+            cloudRememberPlainPassword(roomId, 'view', pw, 'Mở đề');
             cloudSetStatus('🔐 Đã mở khóa xem đề. Dữ liệu cloud sẽ được giải mã trong trình duyệt này.', 'online');
             return true;
         }
@@ -4528,7 +4632,7 @@ ${getPlainTextForAI(opt)}`;
             }
             if (cloudSaveTimeout) clearTimeout(cloudSaveTimeout);
             const snapshot = JSON.parse(JSON.stringify(examData || buildCurrentExamSnapshot()));
-            cloudSaveTimeout = setTimeout(() => pushSnapshotToCloud(snapshot, 'auto'), 1200);
+            cloudSaveTimeout = setTimeout(() => pushSnapshotToCloud(snapshot, 'auto'), 120);
         }
 
         async function startCloudRealtimeSync(id, options = {}) {
@@ -4596,6 +4700,35 @@ ${getPlainTextForAI(opt)}`;
                 const sameAsAlreadyApplied = incomingPayloadFingerprint
                     && incomingPayloadFingerprint === cloudLastRemotePayloadFingerprint
                     && incomingSecurityFingerprint === cloudLastRemoteSecurityFingerprint;
+                const payloadSameAsApplied = incomingPayloadFingerprint && incomingPayloadFingerprint === cloudLastRemotePayloadFingerprint;
+                const securityChangedFast = incomingSecurityFingerprint && incomingSecurityFingerprint !== cloudLastRemoteSecurityFingerprint;
+                const isSecurityOnlyUpdate = Boolean(val && val._sync && val._sync.securityOnly);
+
+                // FIX 2026-06-01 FAST STATE: trạng thái admin bật/tắt cloud/share được áp vào UI ngay,
+                // không đợi giải mã/nạp lại toàn bộ đề nên link truy cập không bị chậm một nhịp.
+                if (securityChangedFast) {
+                    cloudApplyShareAccessModeUI();
+                    updateCloudSyncUI();
+                    if (cloudIsShareVisitor && cloudIsShareVisitor()) {
+                        if (cloudShareIsRevokedOrOff(cloudRoomSecurity)) {
+                            cloudLastRemoteTimestamp = Math.max(cloudLastRemoteTimestamp, incomingUpdatedAt || Date.now());
+                            cloudLastRemoteSecurityFingerprint = incomingSecurityFingerprint || cloudLastRemoteSecurityFingerprint;
+                            cloudShowNotFound('Trang này không tồn tại vì admin đang tắt link share đề chung hoặc link cũ đã bị vô hiệu hóa.');
+                            return;
+                        }
+                        if (cloudVisitorsCanEdit(cloudRoomSecurity) && cloudGetCachedEditHash(roomId) === cloudRequiredEditHash()) {
+                            cloudEditHash = cloudGetCachedEditHash(roomId);
+                            cloudReadOnlyMode = false;
+                            cloudApplyShareAccessModeUI();
+                        }
+                    }
+                    if (isSecurityOnlyUpdate && payloadSameAsApplied) {
+                        cloudLastRemoteTimestamp = Math.max(cloudLastRemoteTimestamp, incomingUpdatedAt || Date.now());
+                        cloudLastRemoteSecurityFingerprint = incomingSecurityFingerprint || cloudLastRemoteSecurityFingerprint;
+                        cloudSetStatus('⚡ Trạng thái admin vừa đổi đã cập nhật ngay trên trang này.', cloudVisitorsCanEdit(cloudRoomSecurity) ? 'online' : 'error');
+                        return;
+                    }
+                }
 
                 // FULL DUPLEX: chỉ bỏ qua bản do CHÍNH TAB NÀY vừa ghi xong.
                 // Bản từ admin/link truy cập/tab khác luôn được nạp về, kể cả cùng một trình duyệt.
@@ -6470,8 +6603,76 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
             return normalizeQuestionTokens(html, 'star').split(QUESTION_STAR_TOKEN).join(QUESTION_BLANK_TOKEN);
         }
 
-        function cleanEditableHtml(html) {
-            const tokenSafeHtml = questionFixedTokenSpansToText(html || '');
+        const EDITOR_GHOST_PLACEHOLDER_TEXTS = [
+            'Nhập tiêu đề Mondai hiện tại...',
+            'Nhập đoạn văn cho nhóm câu hỏi này...',
+            'Nhập đáp án...',
+            'Nhập câu hỏi (Space tạo ô câu hỏi)...',
+            'VD: 海岸(かいがん) HẢI NGẠN - bờ biển',
+            'VD: 【Câu hỏi】 〜ようにする: cố gắng làm... / AI ngữ pháp sẽ quét câu hỏi và A,B,C,D',
+            'Ghi chú riêng...'
+        ];
+
+        function normalizeGhostPlaceholderText(text) {
+            return String(text || '').replace(/[\u00A0\u200B-\u200D\uFEFF]/g, ' ').replace(/\s+/g, ' ').trim();
+        }
+
+        function collectGhostPlaceholderCandidates(extra = '') {
+            const arr = EDITOR_GHOST_PLACEHOLDER_TEXTS.slice();
+            if (extra) arr.unshift(String(extra));
+            return Array.from(new Set(arr.filter(Boolean))).sort((a, b) => b.length - a.length);
+        }
+
+        function removeLeadingGhostPlaceholderFromText(text, extraPlaceholder = '') {
+            let out = String(text || '');
+            const candidates = collectGhostPlaceholderCandidates(extraPlaceholder);
+            let changed = true;
+            while (changed) {
+                changed = false;
+                const leading = (out.match(/^[\s\u00A0\u200B-\u200D\uFEFF]*/) || [''])[0];
+                const rest = out.slice(leading.length);
+                for (const ph of candidates) {
+                    if (rest.startsWith(ph)) {
+                        out = leading + rest.slice(ph.length).replace(/^[\s\u00A0\u200B-\u200D\uFEFF:：\-–—]+/, '');
+                        changed = true;
+                        break;
+                    }
+                    const normalizedRest = normalizeGhostPlaceholderText(rest.slice(0, ph.length + 8));
+                    if (normalizedRest === normalizeGhostPlaceholderText(ph)) {
+                        out = leading + rest.slice(ph.length).replace(/^[\s\u00A0\u200B-\u200D\uFEFF:：\-–—]+/, '');
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+            return out;
+        }
+
+        function stripGhostPlaceholderHtml(html, extraPlaceholder = '') {
+            const holder = document.createElement('div');
+            holder.innerHTML = html || '';
+            const totalText = normalizeGhostPlaceholderText(holder.textContent || '');
+            const candidates = collectGhostPlaceholderCandidates(extraPlaceholder);
+            if (candidates.some(ph => totalText === normalizeGhostPlaceholderText(ph))) return '';
+
+            const walker = document.createTreeWalker(holder, NodeFilter.SHOW_TEXT, null);
+            let node;
+            while ((node = walker.nextNode())) {
+                const before = node.nodeValue || '';
+                const after = removeLeadingGhostPlaceholderFromText(before, extraPlaceholder);
+                if (after !== before) {
+                    node.nodeValue = after;
+                    break;
+                }
+                if (before.trim()) break;
+            }
+            const afterText = normalizeGhostPlaceholderText(holder.textContent || '');
+            if (candidates.some(ph => afterText === normalizeGhostPlaceholderText(ph))) return '';
+            return holder.innerHTML;
+        }
+
+        function cleanEditableHtml(html, placeholderText = '') {
+            const tokenSafeHtml = stripGhostPlaceholderHtml(questionFixedTokenSpansToText(html || ''), placeholderText);
             const cleaned = (tokenSafeHtml || '')
                 .replace(/​/g, '')
                 .replace(/&nbsp;/g, ' ')
@@ -8373,7 +8574,7 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
             const editor = document.getElementById(`dokkai-passage-${gIdx}`);
             if(editor && examSections[activeSectionIndex].groups[gIdx]) {
                 lockRTEObjectsInsideEditor(editor);
-                let html = editor.innerHTML;
+                let html = stripGhostPlaceholderHtml(editor.innerHTML, editor.getAttribute('placeholder') || DOKKAI_PLACEHOLDER_TEXT);
                 if (isOnlyDokkaiPlaceholderHtml(html)) html = '';
                 examSections[activeSectionIndex].groups[gIdx].passageHTML = html; autoSave();
             }
@@ -8702,7 +8903,7 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
             if(isNaN(gIdx) || isNaN(qIdx)) return;
             const q = examSections[activeSectionIndex].groups[gIdx].questions[qIdx];
             
-            const val = input.isContentEditable ? cleanEditableHtml(input.innerHTML) : input.value; 
+            const val = input.isContentEditable ? cleanEditableHtml(input.innerHTML, input.getAttribute('placeholder') || '') : input.value; 
 
             if (input.classList.contains('question-title')) {
                 const sec = examSections?.[activeSectionIndex];
@@ -9152,7 +9353,7 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
         }
 
         let autoSaveTimeout = null;
-        function autoSave() { if (autoSaveTimeout) clearTimeout(autoSaveTimeout); autoSaveTimeout = setTimeout(() => { forceAutoSave(); }, 800); }
+        function autoSave() { if (autoSaveTimeout) clearTimeout(autoSaveTimeout); autoSaveTimeout = setTimeout(() => { forceAutoSave(); }, 90); }
         function forceAutoSave() {
             if(!currentExamId) currentExamId = generateId();
             let storage = JSON.parse(localStorage.getItem('examStorageJLPT_v8')) || [];
@@ -11500,7 +11701,14 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
                     <h2 class="cloud-lock-title" id="cloud-lock-title">Đề đang được khóa</h2>
                     <div class="cloud-lock-message" id="cloud-lock-message">Nhập mật khẩu để xem đề.</div>
                     <div id="cloud-lock-input-wrap">
-                        <input class="cloud-lock-input" id="cloud-lock-input" type="password" autocomplete="off" placeholder="Nhập mật khẩu mở đề">
+                        <div class="cloud-password-field">
+                            <input class="cloud-lock-input" id="cloud-lock-input" type="password" autocomplete="off" placeholder="Nhập mật khẩu mở đề">
+                            <button class="cloud-pass-eye" type="button" data-cloud-eye-target="cloud-lock-input" aria-label="Hiện/ẩn mật khẩu" title="Hiện/ẩn mật khẩu">👁️</button>
+                        </div>
+                        <div class="cloud-pass-meter" id="cloud-lock-pass-meter" aria-live="polite">
+                            <div class="cloud-pass-meter-track"><div class="cloud-pass-meter-fill" id="cloud-lock-pass-meter-fill"></div></div>
+                            <div class="cloud-pass-meter-label" id="cloud-lock-pass-meter-label">Sẵn sàng kiểm tra...</div>
+                        </div>
                         <div class="cloud-lock-actions">
                             <button class="cloud-lock-btn" type="button" id="cloud-lock-submit">Mở đề</button>
                             <button class="cloud-lock-btn secondary" type="button" id="cloud-lock-retry">Tải lại trạng thái</button>
@@ -11523,7 +11731,71 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
             guard.querySelector('#cloud-lock-input').addEventListener('keydown', (event) => {
                 if (event.key === 'Enter') cloudSubmitAccessGuardPassword();
             });
+            cloudWirePasswordEyeButtons(guard);
             return guard;
+        }
+
+
+        // FIX 2026-06-01 SPEED/PASSWORD UX: nút mắt + thanh đo tốc độ kiểm tra mật khẩu.
+        const cloudPasswordMeterTimers = {};
+
+        function cloudWirePasswordEyeButtons(root = document) {
+            const scope = root && root.querySelectorAll ? root : document;
+            scope.querySelectorAll('[data-cloud-eye-target]').forEach(btn => {
+                if (btn.dataset.cloudEyeBound === '1') return;
+                btn.dataset.cloudEyeBound = '1';
+                btn.addEventListener('click', () => {
+                    const targetId = btn.getAttribute('data-cloud-eye-target');
+                    const input = document.getElementById(targetId);
+                    if (!input) return;
+                    const show = input.type === 'password';
+                    input.type = show ? 'text' : 'password';
+                    btn.textContent = show ? '🙈' : '👁️';
+                    btn.title = show ? 'Ẩn mật khẩu' : 'Hiện mật khẩu';
+                    input.focus();
+                });
+            });
+        }
+
+        function cloudStartPasswordMeter(scope, label = 'Đang kiểm tra mật khẩu...') {
+            const meter = document.getElementById(`cloud-${scope}-pass-meter`);
+            const fill = document.getElementById(`cloud-${scope}-pass-meter-fill`);
+            const labelEl = document.getElementById(`cloud-${scope}-pass-meter-label`);
+            const startedAt = performance.now();
+            if (!meter || !fill || !labelEl) return startedAt;
+            if (cloudPasswordMeterTimers[scope]) clearInterval(cloudPasswordMeterTimers[scope]);
+            meter.classList.remove('error');
+            meter.classList.add('active');
+            fill.style.width = '4%';
+            labelEl.textContent = label + ' · 0 ms';
+            cloudPasswordMeterTimers[scope] = setInterval(() => {
+                const elapsed = Math.max(0, performance.now() - startedAt);
+                const pct = Math.min(94, 8 + Math.sqrt(elapsed) * 4.2);
+                fill.style.width = pct.toFixed(1) + '%';
+                labelEl.textContent = `${label} · ${Math.round(elapsed)} ms`;
+            }, 45);
+            return startedAt;
+        }
+
+        function cloudFinishPasswordMeter(scope, ok, startedAt, label) {
+            const meter = document.getElementById(`cloud-${scope}-pass-meter`);
+            const fill = document.getElementById(`cloud-${scope}-pass-meter-fill`);
+            const labelEl = document.getElementById(`cloud-${scope}-pass-meter-label`);
+            if (cloudPasswordMeterTimers[scope]) {
+                clearInterval(cloudPasswordMeterTimers[scope]);
+                delete cloudPasswordMeterTimers[scope];
+            }
+            const elapsed = startedAt ? Math.round(performance.now() - startedAt) : 0;
+            if (!meter || !fill || !labelEl) return;
+            meter.classList.toggle('error', !ok);
+            meter.classList.add('active');
+            fill.style.width = '100%';
+            labelEl.textContent = `${label || (ok ? 'Kiểm tra xong' : 'Kiểm tra thất bại')} · ${elapsed} ms`;
+            if (ok) {
+                setTimeout(() => {
+                    if (!cloudPasswordMeterTimers[scope]) meter.classList.remove('active');
+                }, 900);
+            }
         }
 
         function cloudSetAccessGuard(mode, opts = {}) {
@@ -11585,14 +11857,18 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
             }
             cloudAccessGuardBusy = true;
             errEl.textContent = 'Đang kiểm tra mật khẩu...';
+            const meterStart = cloudStartPasswordMeter('lock', 'Đang đo tốc độ kiểm tra mật khẩu mở đề');
             try {
                 const hash = await cloudHashPassword(pw, 'view', security.viewSalt);
                 if (hash !== security.viewHash) {
+                    cloudFinishPasswordMeter('lock', false, meterStart, 'Sai mật khẩu mở đề');
                     errEl.textContent = 'Sai mật khẩu mở đề.';
                     inputEl.select();
                     return;
                 }
+                cloudFinishPasswordMeter('lock', true, meterStart, 'Mật khẩu mở đề đúng');
                 cloudViewPassword = pw;
+                cloudSetCachedViewPassword(cloudShareId || CLOUD_ACCESS_INITIAL_ROOM_ID, security, pw);
                 cloudRememberPlainPassword(cloudShareId || CLOUD_ACCESS_INITIAL_ROOM_ID, 'view', pw, 'Mở đề');
                 cloudHideAccessGuard();
                 if (typeof cloudAccessGuardResolver === 'function') {
@@ -11601,6 +11877,7 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
                     resolve(true);
                 }
             } catch (err) {
+                cloudFinishPasswordMeter('lock', false, meterStart, 'Lỗi kiểm tra mật khẩu mở đề');
                 errEl.textContent = 'Không kiểm tra được mật khẩu: ' + (err.message || err);
             } finally {
                 cloudAccessGuardBusy = false;
@@ -11708,6 +11985,8 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
                 updatedAt: Date.now()
             };
             cloudRoomSecurity = nextSecurity;
+            updateCloudSyncUI();
+            cloudSetStatus('⚡ Đang đẩy trạng thái admin mới sang link truy cập...', 'saving');
             try {
                 await cloudRef.update({
                     _security: nextSecurity,
@@ -11970,7 +12249,14 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
                 <h3>🌐 Chỉnh sửa chung</h3>
                 <div class="cloud-edit-inline-box">
                     <div class="cloud-edit-inline-note">Bạn đang ở chế độ xem đề. Chỉ được nhập mật khẩu chỉnh sửa đề thi ở ô dưới đây.</div>
-                    <input type="password" id="cloud-inline-edit-password" autocomplete="off" placeholder="Nhập mật khẩu chỉnh sửa đề">
+                    <div class="cloud-password-field">
+                        <input type="password" id="cloud-inline-edit-password" autocomplete="off" placeholder="Nhập mật khẩu chỉnh sửa đề">
+                        <button class="cloud-pass-eye" type="button" data-cloud-eye-target="cloud-inline-edit-password" aria-label="Hiện/ẩn mật khẩu" title="Hiện/ẩn mật khẩu">👁️</button>
+                    </div>
+                    <div class="cloud-pass-meter" id="cloud-inline-edit-pass-meter" aria-live="polite">
+                        <div class="cloud-pass-meter-track"><div class="cloud-pass-meter-fill" id="cloud-inline-edit-pass-meter-fill"></div></div>
+                        <div class="cloud-pass-meter-label" id="cloud-inline-edit-pass-meter-label">Sẵn sàng kiểm tra...</div>
+                    </div>
                     <button type="button" id="cloud-inline-edit-submit">Mở quyền chỉnh sửa đề</button>
                     <div class="cloud-lock-error" id="cloud-inline-edit-error"></div>
                 </div>`;
@@ -11978,11 +12264,13 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
             const btn = panel.querySelector('#cloud-inline-edit-submit');
             if (btn) btn.addEventListener('click', cloudSubmitInlineEditPassword);
             if (input) input.addEventListener('keydown', event => { if (event.key === 'Enter') cloudSubmitInlineEditPassword(); });
+            cloudWirePasswordEyeButtons(panel);
         }
 
         async function cloudSubmitInlineEditPassword() {
             const input = document.getElementById('cloud-inline-edit-password');
             const errEl = document.getElementById('cloud-inline-edit-error');
+            const btn = document.getElementById('cloud-inline-edit-submit');
             const pw = input ? input.value : '';
             if (!pw) {
                 if (errEl) errEl.textContent = 'Cậu chưa nhập mật khẩu chỉnh sửa.';
@@ -11996,25 +12284,37 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
                 if (errEl) errEl.textContent = 'Admin đang tắt cloud chỉnh sửa.';
                 return false;
             }
+            if (btn) btn.disabled = true;
             if (errEl) errEl.textContent = 'Đang kiểm tra mật khẩu sửa...';
-            const hash = await cloudHashPassword(pw, 'edit', cloudRoomSecurity.editSalt || '');
-            if (hash !== cloudRoomSecurity.editHash) {
-                cloudEditHash = '';
-                cloudReadOnlyMode = true;
-                if (errEl) errEl.textContent = 'Sai mật khẩu chỉnh sửa.';
-                if (input) input.select();
+            const meterStart = cloudStartPasswordMeter('inline-edit', 'Đang đo tốc độ kiểm tra mật khẩu sửa');
+            try {
+                const hash = await cloudHashPassword(pw, 'edit', cloudRoomSecurity.editSalt || '');
+                if (hash !== cloudRoomSecurity.editHash) {
+                    cloudEditHash = '';
+                    cloudReadOnlyMode = true;
+                    cloudFinishPasswordMeter('inline-edit', false, meterStart, 'Sai mật khẩu chỉnh sửa');
+                    if (errEl) errEl.textContent = 'Sai mật khẩu chỉnh sửa.';
+                    if (input) input.select();
+                    cloudApplyShareAccessModeUI();
+                    return false;
+                }
+                cloudFinishPasswordMeter('inline-edit', true, meterStart, 'Mật khẩu chỉnh sửa đúng');
+                cloudEditHash = hash;
+                cloudReadOnlyMode = false;
+                cloudSetCachedEditHash(cloudShareId, hash);
+                cloudRememberPlainPassword(cloudShareId, 'edit', pw, 'Chỉnh sửa');
+                cloudSetStatus('🔓 Đã mở quyền chỉnh sửa đề. Thay đổi sẽ tự đồng bộ lên Firebase tốc độ cao.', 'online');
                 cloudApplyShareAccessModeUI();
+                updateCloudSyncUI();
+                initApp();
+                return true;
+            } catch (err) {
+                cloudFinishPasswordMeter('inline-edit', false, meterStart, 'Lỗi kiểm tra mật khẩu sửa');
+                if (errEl) errEl.textContent = 'Không kiểm tra được mật khẩu sửa: ' + (err.message || err);
                 return false;
+            } finally {
+                if (btn) btn.disabled = false;
             }
-            cloudEditHash = hash;
-            cloudReadOnlyMode = false;
-            cloudSetCachedEditHash(cloudShareId, hash);
-            cloudRememberPlainPassword(cloudShareId, 'edit', pw, 'Chỉnh sửa');
-            cloudSetStatus('🔓 Đã mở quyền chỉnh sửa đề. Thay đổi sẽ tự đồng bộ lên Firebase.', 'online');
-            cloudApplyShareAccessModeUI();
-            updateCloudSyncUI();
-            initApp();
-            return true;
         }
 
         function cloudSetEditableDisabledForShare(readOnly) {
@@ -12374,9 +12674,18 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
             if (cloudViewPassword) {
                 try {
                     const hash = await cloudHashPassword(cloudViewPassword, 'view', security.viewSalt);
-                    if (hash === security.viewHash) return true;
+                    if (hash === security.viewHash) {
+                        cloudSetCachedViewPassword(roomId, security, cloudViewPassword);
+                        return true;
+                    }
                 } catch (_) {}
                 cloudViewPassword = '';
+            }
+            if (await cloudTryUseCachedViewPassword(roomId, security)) {
+                cloudHideAccessGuard();
+                cloudApplyShareAccessModeUI();
+                cloudSetStatus('🔐 Đã tự khôi phục trạng thái mở đề sau khi reload.', 'online');
+                return true;
             }
             cloudAccessGuardSecurity = security;
             cloudSetAccessGuard('view-password', {
@@ -12698,6 +13007,38 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
                 }, 0);
             }, false);
         })();
+
+        // FIX 2026-06-01: dọn placeholder bị lưu nhầm trong data cũ/cloud cũ.
+        function cleanGhostPlaceholdersInExamSections(sections) {
+            if (!Array.isArray(sections)) return sections;
+            sections.forEach(sec => {
+                if (!sec || typeof sec !== 'object') return;
+                if (typeof sec.title === 'string') sec.title = stripGhostPlaceholderHtml(sec.title, 'Nhập tiêu đề Mondai hiện tại...');
+                (sec.groups || []).forEach(group => {
+                    if (!group || typeof group !== 'object') return;
+                    if (typeof group.passageHTML === 'string') group.passageHTML = stripGhostPlaceholderHtml(group.passageHTML, DOKKAI_PLACEHOLDER_TEXT);
+                    (group.questions || []).forEach(q => {
+                        if (!q || typeof q !== 'object') return;
+                        if (typeof q.text === 'string') q.text = stripGhostPlaceholderHtml(q.text, 'Nhập câu hỏi (Space tạo ô câu hỏi)...');
+                        if (Array.isArray(q.options)) q.options = q.options.map(opt => typeof opt === 'string' ? stripGhostPlaceholderHtml(opt, 'Nhập đáp án...') : opt);
+                        if (typeof q.explanation === 'string') q.explanation = stripGhostPlaceholderHtml(q.explanation, 'VD: 海岸(かいがん) HẢI NGẠN - bờ biển');
+                        if (typeof q.note === 'string') q.note = stripGhostPlaceholderHtml(q.note, 'VD: 【Câu hỏi】 〜ようにする: cố gắng làm... / AI ngữ pháp sẽ quét câu hỏi và A,B,C,D');
+                    });
+                });
+            });
+            return sections;
+        }
+
+        const originalMigrateDataToV8ForGhostPlaceholderFix = migrateDataToV8;
+        migrateDataToV8 = function(data) {
+            return cleanGhostPlaceholdersInExamSections(originalMigrateDataToV8ForGhostPlaceholderFix(data));
+        };
+
+        const originalForceAutoSaveForGhostPlaceholderFix = forceAutoSave;
+        forceAutoSave = function() {
+            cleanGhostPlaceholdersInExamSections(examSections);
+            return originalForceAutoSaveForGhostPlaceholderFix();
+        };
 
 
         let savedExams = JSON.parse(localStorage.getItem('examStorageJLPT_v8')) || [];
