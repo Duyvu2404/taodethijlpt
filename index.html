@@ -527,6 +527,66 @@
         .question-block { border: 1px solid var(--border-color); padding: 20px; margin-bottom: 15px; border-radius: 12px; background: #ffffff; position: relative; transition: 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.02); }
         .question-block:focus-within { border-color: var(--primary); box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08); }
         
+        /* --- KÉO / ĐỔI THỨ TỰ CÂU HỎI: giữ nguyên dữ liệu, chỉ đổi vị trí trong mảng câu hỏi --- */
+        .question-drag-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin: -4px 38px 12px 0;
+            flex-wrap: wrap;
+        }
+        .question-drag-handle,
+        .question-move-btn {
+            border: 1px solid #bfdbfe;
+            background: #eff6ff;
+            color: #1d4ed8;
+            border-radius: 999px;
+            padding: 6px 10px;
+            font-size: 12px;
+            font-weight: 900;
+            cursor: grab;
+            user-select: none;
+            box-shadow: 0 3px 10px rgba(37,99,235,0.08);
+            transition: transform 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+        }
+        .question-move-btn {
+            width: 30px;
+            height: 30px;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+        .question-drag-handle:hover,
+        .question-move-btn:hover {
+            background: #dbeafe;
+            border-color: var(--primary);
+            transform: translateY(-1px);
+        }
+        .question-drag-handle:active { cursor: grabbing; }
+        .question-block.dragging-question {
+            opacity: 0.55;
+            border-style: dashed !important;
+            border-color: var(--primary) !important;
+            box-shadow: 0 0 0 4px rgba(37,99,235,0.15) !important;
+        }
+        .question-block.drop-before::before,
+        .question-block.drop-after::after {
+            content: "";
+            position: absolute;
+            left: 14px;
+            right: 14px;
+            height: 4px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, transparent, var(--primary), transparent);
+            box-shadow: 0 0 0 4px rgba(37,99,235,0.12);
+            z-index: 20;
+            pointer-events: none;
+        }
+        .question-block.drop-before::before { top: -10px; }
+        .question-block.drop-after::after { bottom: -10px; }
+
         .input-group { display: flex; align-items: stretch; border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; }
         
         /* --- NGĂN CHẶN CHỮ "CÂU" BỊ RỚT DÒNG --- */
@@ -6690,6 +6750,9 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
                         block.setAttribute('data-s-idx', actualSectionIndex);
                         block.setAttribute('data-g-idx', gIdx);
                         block.setAttribute('data-q-idx', qIdx);
+                        block.setAttribute('ondragover', `handleQuestionDragOver(event, ${actualSectionIndex}, ${gIdx}, ${qIdx}, this)`);
+                        block.setAttribute('ondragleave', 'handleQuestionDragLeave(event, this)');
+                        block.setAttribute('ondrop', `handleQuestionDrop(event, ${actualSectionIndex}, ${gIdx}, ${qIdx}, this)`);
 
                         let optsHTML = '';
                         const labels = ['A', 'B', 'C', 'D'];
@@ -6714,7 +6777,13 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
 
                         const explainFields = getQuestionExplanationFields(q);
                         block.innerHTML = `
-                            <button class="btn-delete-neat" tabindex="-1" onclick="deleteQuestion(${gIdx}, ${qIdx})" title="Xóa câu này">🗑</button>                            ${imageBlock}
+                            <button class="btn-delete-neat" tabindex="-1" onclick="deleteQuestion(${gIdx}, ${qIdx})" title="Xóa câu này">🗑</button>
+                            <div class="question-drag-toolbar">
+                                <button type="button" tabindex="-1" class="question-drag-handle" draggable="true" title="Giữ nút này rồi kéo câu lên/xuống. STT câu sẽ tự cập nhật." ondragstart="handleQuestionDragStart(event, ${actualSectionIndex}, ${gIdx}, ${qIdx})" ondragend="handleQuestionDragEnd(event)">↕ Kéo câu</button>
+                                <button type="button" tabindex="-1" class="question-move-btn" title="Đưa câu này lên 1 vị trí" onclick="moveQuestionStep(${actualSectionIndex}, ${gIdx}, ${qIdx}, -1, event)">↑</button>
+                                <button type="button" tabindex="-1" class="question-move-btn" title="Đưa câu này xuống 1 vị trí" onclick="moveQuestionStep(${actualSectionIndex}, ${gIdx}, ${qIdx}, 1, event)">↓</button>
+                            </div>
+                            ${imageBlock}
                             <div class="question-header">
                                 <div class="q-main input-group">
                                 <span class="prefix-label" onclick="toggleSingleExplanation(this)" title="Nhấn để ẩn/hiện lời giải câu này">Câu ${q.id}.</span>
@@ -9461,6 +9530,132 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
                 }, 80);
             }
             showRTEToast('Đã thêm câu hỏi ngay phía sau.');
+        }
+
+
+        // ==========================================
+        // KÉO / ĐỔI THỨ TỰ CÂU HỎI
+        // Chỉ thao tác trên dữ liệu examSections hiện tại, không tạo lại link share.
+        // Sau khi đổi vị trí, initApp() sẽ tự reindex STT và autoSave() sẽ đồng bộ local/cloud như cơ chế cũ.
+        // ==========================================
+        let questionDragState = null;
+
+        function clearQuestionDropMarkers(root = document) {
+            const scope = root?.querySelectorAll ? root : document;
+            scope.querySelectorAll('.question-block.drop-before, .question-block.drop-after').forEach(el => {
+                el.classList.remove('drop-before', 'drop-after');
+            });
+        }
+
+        function getQuestionDropAfter(event, block) {
+            const rect = block.getBoundingClientRect();
+            return (event.clientY - rect.top) > (rect.height / 2);
+        }
+
+        function handleQuestionDragStart(event, sIdx, gIdx, qIdx) {
+            event.stopPropagation();
+            questionDragState = { sIdx, gIdx, qIdx };
+            try {
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', JSON.stringify(questionDragState));
+            } catch (err) {}
+            const block = event.target.closest('.question-block');
+            if (block) block.classList.add('dragging-question');
+        }
+
+        function handleQuestionDragEnd(event) {
+            const block = event?.target?.closest?.('.question-block');
+            if (block) block.classList.remove('dragging-question');
+            document.querySelectorAll('.question-block.dragging-question').forEach(el => el.classList.remove('dragging-question'));
+            clearQuestionDropMarkers(document);
+            questionDragState = null;
+        }
+
+        function handleQuestionDragOver(event, sIdx, gIdx, qIdx, block) {
+            if (!questionDragState || questionDragState.sIdx !== sIdx) return;
+            event.preventDefault();
+            event.stopPropagation();
+            try { event.dataTransfer.dropEffect = 'move'; } catch (err) {}
+            document.querySelectorAll('.question-block.drop-before, .question-block.drop-after').forEach(el => {
+                if (el !== block) el.classList.remove('drop-before', 'drop-after');
+            });
+            block.classList.toggle('drop-after', getQuestionDropAfter(event, block));
+            block.classList.toggle('drop-before', !getQuestionDropAfter(event, block));
+        }
+
+        function handleQuestionDragLeave(event, block) {
+            if (event.relatedTarget && block.contains(event.relatedTarget)) return;
+            block.classList.remove('drop-before', 'drop-after');
+        }
+
+        function moveQuestionToPosition(source, target, insertAfter = false) {
+            const sec = examSections?.[source.sIdx];
+            if (!sec || source.sIdx !== target.sIdx) return false;
+            const sourceGroup = sec.groups?.[source.gIdx];
+            const targetGroup = sec.groups?.[target.gIdx];
+            if (!sourceGroup || !targetGroup || !Array.isArray(sourceGroup.questions) || !Array.isArray(targetGroup.questions)) return false;
+            if (!sourceGroup.questions[source.qIdx]) return false;
+
+            let insertIndex = target.qIdx + (insertAfter ? 1 : 0);
+            if (source.gIdx === target.gIdx) {
+                if (source.qIdx === target.qIdx || (source.qIdx + 1 === insertIndex)) return false;
+                const maxIndex = sourceGroup.questions.length;
+                insertIndex = Math.max(0, Math.min(insertIndex, maxIndex));
+                const moved = sourceGroup.questions.splice(source.qIdx, 1)[0];
+                if (source.qIdx < insertIndex) insertIndex--;
+                sourceGroup.questions.splice(insertIndex, 0, moved);
+            } else {
+                const moved = sourceGroup.questions.splice(source.qIdx, 1)[0];
+                insertIndex = Math.max(0, Math.min(insertIndex, targetGroup.questions.length));
+                targetGroup.questions.splice(insertIndex, 0, moved);
+                if (sourceGroup.questions.length === 0) sourceGroup.questions.push(getEmptyQuestion());
+            }
+
+            activeSectionIndex = source.sIdx;
+            globalActiveFocus = { sIdx: source.sIdx, gIdx: target.gIdx, qIdx: insertIndex };
+            initApp();
+            autoSave();
+            setTimeout(() => {
+                const block = document.getElementById(`question-block-g${target.gIdx}-q${insertIndex}`);
+                if (block) block.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 80);
+            if (typeof showRTEToast === 'function') showRTEToast('Đã đổi thứ tự câu hỏi và cập nhật STT.');
+            return true;
+        }
+
+        function handleQuestionDrop(event, sIdx, gIdx, qIdx, block) {
+            if (!questionDragState || questionDragState.sIdx !== sIdx) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const insertAfter = getQuestionDropAfter(event, block);
+            moveQuestionToPosition(questionDragState, { sIdx, gIdx, qIdx }, insertAfter);
+            handleQuestionDragEnd(event);
+        }
+
+        function moveQuestionStep(sIdx, gIdx, qIdx, direction, event) {
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            const sec = examSections?.[sIdx];
+            const group = sec?.groups?.[gIdx];
+            if (!group || !Array.isArray(group.questions)) return;
+
+            if (direction < 0) {
+                if (qIdx > 0) {
+                    moveQuestionToPosition({ sIdx, gIdx, qIdx }, { sIdx, gIdx, qIdx: qIdx - 1 }, false);
+                } else if (gIdx > 0) {
+                    const prevGroup = sec.groups[gIdx - 1];
+                    const lastIdx = Math.max(0, (prevGroup.questions || []).length - 1);
+                    moveQuestionToPosition({ sIdx, gIdx, qIdx }, { sIdx, gIdx: gIdx - 1, qIdx: lastIdx }, true);
+                }
+            } else {
+                if (qIdx < group.questions.length - 1) {
+                    moveQuestionToPosition({ sIdx, gIdx, qIdx }, { sIdx, gIdx, qIdx: qIdx + 1 }, true);
+                } else if (gIdx < sec.groups.length - 1) {
+                    moveQuestionToPosition({ sIdx, gIdx, qIdx }, { sIdx, gIdx: gIdx + 1, qIdx: 0 }, false);
+                }
+            }
         }
 
         function addQuestionToGroup(gIdx, isQuickAdd = false) {
