@@ -13381,6 +13381,826 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
         };
 
 
+
+
+        // ==========================================
+        // FINAL PATCH 2026-06-03: ADMIN TRUST + LINK LIBRARY + SAFE FIREBASE FLOW
+        // - Giữ nguyên chức năng cũ, chỉ vá lớp cuối trước khi khởi động app.
+        // - Admin đã tạo link trên trình duyệt này không cần nhập lại mật khẩu xem/sửa/quản trị.
+        // - Link người truy cập vẫn phải nhập mật khẩu mở đề lần đầu trên trình duyệt của họ.
+        // - fcfg trên URL chỉ dùng theo phiên, không tự ghi đè Firebase config local của admin.
+        // - Nút đẩy kho: lần đầu tạo link thì đẩy, sau đó đổi thành nút lấy dữ liệu kho về.
+        // - Thư viện link lưu trong cùng Firebase và hỗ trợ truy cập/xóa vĩnh cửu.
+        // ==========================================
+        (function installAdminTrustedLinkLibraryFinalPatch(){
+            if (window.__jlptAdminTrustedLinkLibraryFinalPatchInstalled) return;
+            window.__jlptAdminTrustedLinkLibraryFinalPatchInstalled = true;
+
+            const TRUST_PREFIX = 'jlpt_cloud_admin_trusted_room_v4_';
+            const LOCAL_LINK_LIBRARY_PREFIX = 'jlpt_cloud_link_library_local_v1_';
+            const LINK_LIBRARY_PATH = 'sharedExamLinkLibrary';
+
+            function finalSafeJsonParse(raw, fallback = null) {
+                try { return raw ? JSON.parse(raw) : fallback; } catch (_) { return fallback; }
+            }
+
+            function finalCssText() {
+                return `
+                    html, body { height: 100dvh !important; min-height: 100dvh !important; overflow: hidden !important; }
+                    body { box-sizing: border-box !important; }
+                    .main-content { height: calc(100dvh - 40px) !important; min-height: 0 !important; }
+                    #editor-container { min-height: 0 !important; flex: 1 1 auto !important; }
+                    .sidebar { height: calc(100dvh - 40px) !important; min-height: 0 !important; }
+                    @media (max-width: 900px) {
+                        .main-content, .sidebar { height: calc(100dvh - 24px) !important; }
+                    }
+                    .cloud-link-library-modal .modal-content { width: min(940px, calc(100vw - 28px)); max-height: min(760px, calc(100dvh - 34px)); overflow: hidden; display: flex; flex-direction: column; }
+                    .cloud-link-library-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+                    .cloud-link-library-head h2 { margin:0; font-size:20px; color:#0f172a; }
+                    .cloud-link-library-body { overflow:auto; padding-right:4px; display:flex; flex-direction:column; gap:10px; }
+                    .cloud-link-card { border:1px solid #dbeafe; background:linear-gradient(90deg,#f8fafc,#eff6ff); border-radius:14px; padding:12px; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:center; }
+                    .cloud-link-card-title { font-weight:900; color:#1e3a8a; font-size:14px; line-height:1.35; }
+                    .cloud-link-card-meta { color:#475569; font-size:12px; line-height:1.45; margin-top:4px; word-break:break-word; }
+                    .cloud-link-card-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:7px; }
+                    .cloud-link-card-actions button, .cloud-link-library-close { border:0; border-radius:999px; padding:8px 11px; font-weight:800; font-size:12px; cursor:pointer; color:white; }
+                    .cloud-link-access { background:#2563eb; }
+                    .cloud-link-copy { background:#0f766e; }
+                    .cloud-link-delete { background:#ef4444; }
+                    .cloud-link-library-close { background:#475569; }
+                    .cloud-link-empty { text-align:center; color:#64748b; border:2px dashed #cbd5e1; border-radius:14px; padding:26px 12px; font-weight:800; background:#f8fafc; }
+                    .cloud-link-library-note { font-size:12px; color:#64748b; background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:10px 12px; margin-bottom:10px; line-height:1.45; }
+                `;
+            }
+
+            function installFinalCss() {
+                if (document.getElementById('jlpt-admin-trusted-link-library-css')) return;
+                const style = document.createElement('style');
+                style.id = 'jlpt-admin-trusted-link-library-css';
+                style.textContent = finalCssText();
+                document.head.appendChild(style);
+            }
+
+            function persistedFirebaseConfigNoUrl() {
+                try {
+                    const localCfg = JSON.parse(localStorage.getItem(CLOUD_SYNC_LOCAL_CONFIG_KEY) || 'null');
+                    if (cloudFirebaseConfigLooksValid(localCfg)) return localCfg;
+                } catch (_) {}
+                if (cloudFirebaseConfigLooksValid(CLOUD_SYNC_FIREBASE_CONFIG)) return CLOUD_SYNC_FIREBASE_CONFIG;
+                return null;
+            }
+
+            function configFingerprint(cfg) {
+                const clean = cfg && typeof cfg === 'object' ? {
+                    projectId: String(cfg.projectId || ''),
+                    databaseURL: String(cfg.databaseURL || ''),
+                    apiKey: String(cfg.apiKey || '').slice(0, 24)
+                } : {};
+                const raw = JSON.stringify(clean);
+                try {
+                    if (typeof cloudBase64UrlEncodeUtf8 === 'function') return cloudBase64UrlEncodeUtf8(raw).slice(0, 90);
+                } catch (_) {}
+                try { return btoa(raw).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 90); } catch (_) { return 'no_scope'; }
+            }
+
+            function currentFirebaseScopeForAdmin() {
+                return configFingerprint(persistedFirebaseConfigNoUrl() || (typeof cloudGetFirebaseConfigFromUrl === 'function' ? cloudGetFirebaseConfigFromUrl() : null) || getCloudFirebaseConfig());
+            }
+
+            function currentFirebaseScopeForRuntime() {
+                return configFingerprint(getCloudFirebaseConfig() || persistedFirebaseConfigNoUrl() || (typeof cloudGetFirebaseConfigFromUrl === 'function' ? cloudGetFirebaseConfigFromUrl() : null));
+            }
+
+            function trustKey(roomId = cloudShareId) {
+                const id = cloudSanitizeExamId(roomId || '');
+                if (!id) return '';
+                return TRUST_PREFIX + currentFirebaseScopeForAdmin() + '_' + id;
+            }
+
+            function localLinkLibraryKey() {
+                return LOCAL_LINK_LIBRARY_PREFIX + currentFirebaseScopeForRuntime();
+            }
+
+            function getAdminTrust(roomId = cloudShareId) {
+                const key = trustKey(roomId);
+                if (!key) return null;
+                return finalSafeJsonParse(localStorage.getItem(key), null);
+            }
+
+            function setAdminTrust(roomId = cloudShareId, extra = {}) {
+                if (typeof cloudIsShareVisitor === 'function' && cloudIsShareVisitor()) return;
+                const id = cloudSanitizeExamId(roomId || cloudShareId || currentExamId || '');
+                const key = trustKey(id);
+                if (!id || !key) return;
+                const old = finalSafeJsonParse(localStorage.getItem(key), {}) || {};
+                const payload = {
+                    ...old,
+                    roomId: id,
+                    firebaseScope: currentFirebaseScopeForAdmin(),
+                    trusted: true,
+                    updatedAt: Date.now(),
+                    updatedAtText: new Date().toLocaleString('vi-VN'),
+                    viewPassword: cloudViewPassword || old.viewPassword || '',
+                    editHash: cloudEditHash || old.editHash || '',
+                    adminHash: cloudAdminHash || old.adminHash || '',
+                    securityRevision: cloudRoomSecurity ? String(cloudRoomSecurity.revision || cloudRoomSecurity.updatedAt || '') : (old.securityRevision || ''),
+                    ...extra
+                };
+                try { localStorage.setItem(key, JSON.stringify(payload)); } catch (_) {}
+            }
+
+            function removeAdminTrust(roomId = cloudShareId) {
+                const key = trustKey(roomId);
+                if (key) localStorage.removeItem(key);
+            }
+
+            function isAdminTrustedForRoom(roomId) {
+                const id = cloudSanitizeExamId(roomId || '');
+                if (!id) return false;
+                const trust = getAdminTrust(id);
+                return Boolean(trust && trust.trusted && trust.roomId === id);
+            }
+
+            const originalCloudIsShareVisitorFinal = cloudIsShareVisitor;
+            cloudIsShareVisitor = function() {
+                const initialRoom = cloudSanitizeExamId(CLOUD_ACCESS_INITIAL_ROOM_ID || '');
+                if (!initialRoom) return false;
+                return !isAdminTrustedForRoom(initialRoom);
+            };
+            window.cloudIsShareVisitor = cloudIsShareVisitor;
+
+            const originalGetCloudFirebaseConfigFinal = getCloudFirebaseConfig;
+            getCloudFirebaseConfig = function() {
+                const fromUrl = (typeof cloudGetFirebaseConfigFromUrl === 'function') ? cloudGetFirebaseConfigFromUrl() : null;
+                const persisted = persistedFirebaseConfigNoUrl();
+                if (typeof cloudIsShareVisitor === 'function' && cloudIsShareVisitor()) {
+                    return cloudFirebaseConfigLooksValid(fromUrl) ? fromUrl : (persisted || originalGetCloudFirebaseConfigFinal());
+                }
+                // Admin: ưu tiên config local/static. fcfg trên link chỉ là dữ liệu của phiên, tuyệt đối không ghi đè localStorage admin.
+                return persisted || (cloudFirebaseConfigLooksValid(fromUrl) ? fromUrl : originalGetCloudFirebaseConfigFinal());
+            };
+
+            function applyTrustedAdminHashes(roomId = cloudShareId, security = cloudRoomSecurity) {
+                if (typeof cloudIsShareVisitor === 'function' && cloudIsShareVisitor()) return false;
+                const trust = getAdminTrust(roomId);
+                if (!trust || !security) return false;
+                let changed = false;
+                if (trust.editHash && security.editHash && trust.editHash === security.editHash) {
+                    cloudEditHash = trust.editHash;
+                    cloudReadOnlyMode = false;
+                    changed = true;
+                }
+                if (trust.adminHash && security.adminHash && trust.adminHash === security.adminHash) {
+                    cloudAdminHash = trust.adminHash;
+                    changed = true;
+                }
+                return changed;
+            }
+
+            async function applyTrustedAdminViewPassword(roomId = cloudShareId, security = cloudRoomSecurity) {
+                if (typeof cloudIsShareVisitor === 'function' && cloudIsShareVisitor()) return false;
+                const id = cloudSanitizeExamId(roomId || '');
+                if (!id || !security || !security.viewHash || !security.viewSalt) return false;
+                const candidates = [];
+                const trust = getAdminTrust(id);
+                if (trust && trust.viewPassword) candidates.push(trust.viewPassword);
+                try {
+                    const hist = (typeof cloudGetPlainPasswordHistory === 'function') ? cloudGetPlainPasswordHistory(id) : [];
+                    hist.filter(item => item && item.type === 'view' && item.password).forEach(item => candidates.push(item.password));
+                } catch (_) {}
+                for (const pw of [...new Set(candidates.map(String))]) {
+                    try {
+                        const hash = await cloudHashPassword(pw, 'view', security.viewSalt || '');
+                        if (hash === security.viewHash) {
+                            cloudViewPassword = pw;
+                            cloudSetCachedViewPassword(id, security, pw);
+                            setAdminTrust(id, { viewPassword: pw });
+                            return true;
+                        }
+                    } catch (_) {}
+                }
+                return false;
+            }
+
+            const originalCloudApplySecurityFinal = cloudApplySecurityFromRemote;
+            cloudApplySecurityFromRemote = function(val, roomId) {
+                originalCloudApplySecurityFinal(val, roomId);
+                if (!cloudIsShareVisitor()) {
+                    applyTrustedAdminHashes(roomId, cloudRoomSecurity);
+                    setAdminTrust(roomId, {});
+                    cloudReadOnlyMode = !cloudCanWriteToCurrentRoom();
+                }
+            };
+
+            const originalCloudEnsureViewUnlockedFinal = cloudEnsureViewUnlocked;
+            cloudEnsureViewUnlocked = async function(remoteVal = null, roomId = cloudShareId) {
+                if (!cloudIsShareVisitor()) {
+                    const val = remoteVal || {};
+                    const security = val._security || cloudRoomSecurity || null;
+                    const encryptedPayload = val._payloadEncrypted || null;
+                    if (encryptedPayload && security && security.viewHash && security.viewSalt) {
+                        if (cloudViewPassword) {
+                            try {
+                                const hash = await cloudHashPassword(cloudViewPassword, 'view', security.viewSalt || '');
+                                if (hash === security.viewHash) {
+                                    cloudSetCachedViewPassword(roomId, security, cloudViewPassword);
+                                    setAdminTrust(roomId, { viewPassword: cloudViewPassword });
+                                    return true;
+                                }
+                            } catch (_) {}
+                        }
+                        if (await applyTrustedAdminViewPassword(roomId, security)) return true;
+                    }
+                }
+                return originalCloudEnsureViewUnlockedFinal(remoteVal, roomId);
+            };
+
+            const originalCloudUnlockAdminFinal = cloudUnlockAdmin;
+            cloudUnlockAdmin = async function() {
+                if (!cloudIsShareVisitor()) {
+                    applyTrustedAdminHashes(cloudShareId, cloudRoomSecurity);
+                    if (cloudCanAdminCurrentRoom()) return true;
+                }
+                return originalCloudUnlockAdminFinal();
+            };
+
+            const originalCloudPromptCreateSecurityFinal = cloudPromptCreateSecurity;
+            cloudPromptCreateSecurity = async function(roomId = cloudShareId) {
+                const ok = await originalCloudPromptCreateSecurityFinal(roomId);
+                if (ok && !cloudIsShareVisitor()) {
+                    setAdminTrust(roomId, {
+                        viewPassword: cloudViewPassword || '',
+                        editHash: cloudEditHash || '',
+                        adminHash: cloudAdminHash || '',
+                        createdAt: Date.now(),
+                        createdAtText: new Date().toLocaleString('vi-VN')
+                    });
+                }
+                return ok;
+            };
+
+            const originalCloudUpdateSecurityPatchFinal = cloudUpdateSecurityPatch;
+            cloudUpdateSecurityPatch = async function(patch = {}, opts = {}) {
+                const ok = await originalCloudUpdateSecurityPatchFinal(patch, opts);
+                if (ok && !cloudIsShareVisitor()) setAdminTrust(cloudShareId, {});
+                return ok;
+            };
+
+            const originalCloudAdminChangePasswordFinal = cloudAdminChangePassword;
+            cloudAdminChangePassword = async function(kind) {
+                const res = await originalCloudAdminChangePasswordFinal(kind);
+                if (!cloudIsShareVisitor()) setAdminTrust(cloudShareId, {});
+                return res;
+            };
+
+            function getLocalLinkLibrary() {
+                return finalSafeJsonParse(localStorage.getItem(localLinkLibraryKey()), []) || [];
+            }
+
+            function setLocalLinkLibrary(list) {
+                try { localStorage.setItem(localLinkLibraryKey(), JSON.stringify((Array.isArray(list) ? list : []).slice(0, 200))); } catch (_) {}
+            }
+
+            function upsertLocalLinkEntry(entry) {
+                if (!entry || !entry.id) return;
+                const list = getLocalLinkLibrary().filter(item => item && item.id !== entry.id);
+                list.unshift(entry);
+                setLocalLinkLibrary(list);
+            }
+
+            function removeLocalLinkEntry(id) {
+                setLocalLinkLibrary(getLocalLinkLibrary().filter(item => item && item.id !== id));
+            }
+
+            function currentLinkEntry(id = cloudShareId) {
+                const safeId = cloudSanitizeExamId(id || '');
+                const filename = document.getElementById('filename-field')?.value?.trim() || 'Đề chưa đặt tên';
+                return {
+                    id: safeId,
+                    title: filename,
+                    filename,
+                    link: makeCloudShareUrl(safeId),
+                    firebaseScope: currentFirebaseScopeForRuntime(),
+                    createdAt: Date.now(),
+                    updatedAt: Date.now(),
+                    updatedAtText: new Date().toLocaleString('vi-VN'),
+                    lastLocalExamId: currentExamId || safeId
+                };
+            }
+
+            async function saveLinkEntryToLibrary(id = cloudShareId, extra = {}) {
+                if (!id || cloudIsShareVisitor()) return;
+                const entry = { ...currentLinkEntry(id), ...extra, id: cloudSanitizeExamId(id) };
+                upsertLocalLinkEntry(entry);
+                try {
+                    ensureCloudFirebaseReady();
+                    await cloudDb.ref(`${LINK_LIBRARY_PATH}/${entry.id}`).update({
+                        ...entry,
+                        updatedAt: firebase.database.ServerValue.TIMESTAMP,
+                        updatedAtLocal: Date.now()
+                    });
+                } catch (err) {
+                    console.warn('Không ghi được thư viện link Firebase:', err);
+                }
+            }
+
+            async function loadLinkLibraryEntries() {
+                const map = new Map();
+                getLocalLinkLibrary().forEach(item => { if (item && item.id) map.set(item.id, item); });
+                try {
+                    ensureCloudFirebaseReady();
+                    const snap = await cloudDb.ref(LINK_LIBRARY_PATH).once('value');
+                    const val = snap.val() || {};
+                    Object.keys(val).forEach(id => {
+                        const item = val[id];
+                        if (item && typeof item === 'object') map.set(id, { ...item, id });
+                    });
+                } catch (err) {
+                    console.warn('Không đọc được thư viện link Firebase:', err);
+                }
+                return Array.from(map.values()).filter(item => item && item.id && !item.deleted).sort((a,b) => Number(b.updatedAtLocal || b.updatedAt || b.createdAt || 0) - Number(a.updatedAtLocal || a.updatedAt || a.createdAt || 0));
+            }
+
+            function ensureLinkLibraryModal() {
+                let modal = document.getElementById('cloud-link-library-modal');
+                if (modal) return modal;
+                modal = document.createElement('div');
+                modal.id = 'cloud-link-library-modal';
+                modal.className = 'modal-overlay cloud-link-library-modal';
+                modal.innerHTML = `
+                    <div class="modal-content">
+                        <div class="cloud-link-library-head">
+                            <h2>📚 Thư viện link đã tạo</h2>
+                            <button type="button" class="cloud-link-library-close" id="cloud-link-library-close">Đóng</button>
+                        </div>
+                        <div class="cloud-link-library-note">Thư viện này đọc/ghi trong cùng kho Firebase hiện tại. Bấm “Truy cập” để mở lại link đó ở quyền admin trên máy này. Bấm “Xóa vĩnh cửu” sẽ xóa dữ liệu link khỏi Firebase và khỏi thư viện.</div>
+                        <div id="cloud-link-library-body" class="cloud-link-library-body"></div>
+                    </div>`;
+                document.body.appendChild(modal);
+                modal.querySelector('#cloud-link-library-close').addEventListener('click', closeCloudLinkLibrary);
+                modal.addEventListener('click', event => { if (event.target === modal) closeCloudLinkLibrary(); });
+                modal.querySelector('#cloud-link-library-body').addEventListener('click', event => {
+                    const btn = event.target.closest('button[data-cloud-library-action]');
+                    if (!btn) return;
+                    const id = btn.getAttribute('data-id');
+                    const action = btn.getAttribute('data-cloud-library-action');
+                    if (action === 'access') accessLinkFromLibrary(id);
+                    if (action === 'copy') copyLinkFromLibrary(id);
+                    if (action === 'delete') deleteLinkPermanently(id);
+                });
+                return modal;
+            }
+
+            function renderLinkLibrary(entries) {
+                const body = document.getElementById('cloud-link-library-body');
+                if (!body) return;
+                if (!entries.length) {
+                    body.innerHTML = '<div class="cloud-link-empty">Chưa có link nào trong thư viện của kho Firebase này.</div>';
+                    return;
+                }
+                body.innerHTML = entries.map(item => {
+                    const id = cloudSanitizeExamId(item.id || '');
+                    const title = escapeHtml(item.title || item.filename || 'Đề chưa đặt tên');
+                    const link = escapeHtml(item.link || makeCloudShareUrl(id));
+                    const time = escapeHtml(item.updatedAtText || item.createdAtText || '');
+                    return `
+                        <div class="cloud-link-card">
+                            <div>
+                                <div class="cloud-link-card-title">${title}</div>
+                                <div class="cloud-link-card-meta"><b>Mã:</b> ${escapeHtml(id)}<br><b>Link:</b> ${link}<br><b>Cập nhật:</b> ${time || 'Không rõ'}</div>
+                            </div>
+                            <div class="cloud-link-card-actions">
+                                <button type="button" class="cloud-link-access" data-cloud-library-action="access" data-id="${escapeHtml(id)}">Truy cập</button>
+                                <button type="button" class="cloud-link-copy" data-cloud-library-action="copy" data-id="${escapeHtml(id)}">Copy</button>
+                                <button type="button" class="cloud-link-delete" data-cloud-library-action="delete" data-id="${escapeHtml(id)}">Xóa vĩnh cửu</button>
+                            </div>
+                        </div>`;
+                }).join('');
+            }
+
+            async function openCloudLinkLibrary() {
+                if (!cloudShareFeatureGuard('mở thư viện link')) return;
+                const modal = ensureLinkLibraryModal();
+                modal.style.display = 'flex';
+                const body = document.getElementById('cloud-link-library-body');
+                if (body) body.innerHTML = '<div class="cloud-link-empty">Đang tải thư viện link từ Firebase...</div>';
+                const entries = await loadLinkLibraryEntries();
+                renderLinkLibrary(entries);
+            }
+
+            function closeCloudLinkLibrary() {
+                const modal = document.getElementById('cloud-link-library-modal');
+                if (modal) modal.style.display = 'none';
+            }
+
+            async function accessLinkFromLibrary(id) {
+                const safeId = cloudSanitizeExamId(id || '');
+                if (!safeId) return;
+                closeCloudLinkLibrary();
+                setAdminTrust(safeId, { libraryAccessAt: Date.now() });
+                cloudSetStatus('📚 Đang truy cập lại link trong thư viện...', 'saving');
+                await startCloudRealtimeSync(safeId, { pushCurrent: false, silent: false, libraryAccess: true });
+                await saveLinkEntryToLibrary(safeId, { libraryAccessAt: Date.now() });
+            }
+
+            function copyLinkFromLibrary(id) {
+                const safeId = cloudSanitizeExamId(id || '');
+                if (!safeId) return;
+                const link = makeCloudShareUrl(safeId);
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(link).then(() => showRTEToast('Đã copy link trong thư viện.')).catch(() => prompt('Copy link:', link));
+                } else {
+                    prompt('Copy link:', link);
+                }
+            }
+
+            async function deleteLinkPermanently(id) {
+                const safeId = cloudSanitizeExamId(id || '');
+                if (!safeId) return;
+                const ok = confirm('XÓA VĨNH CỬU LINK NÀY?\n\nMã link: ' + safeId + '\n\nHành động này sẽ xóa sharedExams/' + safeId + ' trên Firebase và xóa khỏi thư viện link. Người mở link sẽ thấy trang không tồn tại. Dữ liệu đề local trên máy admin KHÔNG bị xóa.');
+                if (!ok) return;
+                try {
+                    ensureCloudFirebaseReady();
+                    await cloudDb.ref(`${CLOUD_SYNC_PATH}/${safeId}`).remove();
+                    await cloudDb.ref(`${LINK_LIBRARY_PATH}/${safeId}`).remove();
+                    removeLocalLinkEntry(safeId);
+                    cloudForgetCachedViewPassword(safeId);
+                    cloudClearCachedEditHash(safeId);
+                    removeAdminTrust(safeId);
+                    try { localStorage.removeItem(cloudLocalPasswordHistoryKey(safeId)); } catch (_) {}
+                    if (cloudShareId === safeId) {
+                        if (cloudRef) { try { cloudRef.off(); } catch (_) {} }
+                        cloudRef = null;
+                        cloudShareId = null;
+                        cloudRoomSecurity = null;
+                        cloudViewPassword = '';
+                        cloudEditHash = '';
+                        cloudAdminHash = '';
+                        cloudReadOnlyMode = false;
+                        cloudRoomIsEncrypted = false;
+                        updateCloudSyncUI();
+                    }
+                    cloudSetStatus('🗑️ Đã xóa vĩnh cửu link ' + safeId + ' khỏi Firebase và thư viện. Dữ liệu local admin vẫn giữ nguyên.', 'online');
+                    const entries = await loadLinkLibraryEntries();
+                    renderLinkLibrary(entries);
+                } catch (err) {
+                    console.error(err);
+                    alert('Không xóa được link trên Firebase: ' + (err.message || err));
+                }
+            }
+
+            async function pullCurrentCloudSnapshotToAdmin() {
+                if (!cloudShareFeatureGuard('lấy dữ liệu kho lưu trữ về')) return;
+                const roomId = cloudSanitizeExamId(cloudShareId || currentExamId || '');
+                if (!roomId) {
+                    alert('Chưa có mã/link cloud để lấy dữ liệu về. Hãy tạo/mở link trước.');
+                    return;
+                }
+                try {
+                    ensureCloudFirebaseReady();
+                    const ref = cloudDb.ref(`${CLOUD_SYNC_PATH}/${roomId}`);
+                    cloudSetStatus('📥 Đang lấy dữ liệu mới nhất từ kho Firebase về admin...', 'saving');
+                    const snap = await ref.once('value');
+                    const val = snap.val();
+                    if (!val) {
+                        cloudSetStatus('Trang/link này không còn tồn tại trên Firebase.', 'error');
+                        alert('Không còn dữ liệu của link này trên Firebase. Có thể link đã bị xóa vĩnh cửu.');
+                        return;
+                    }
+                    cloudApplySecurityFromRemote(val, roomId);
+                    applyTrustedAdminHashes(roomId, cloudRoomSecurity);
+                    const examData = await normalizeCloudExamSnapshotSecure(val, roomId);
+                    if (!examData) return;
+                    cloudApplyingRemote = true;
+                    try {
+                        loadExamData(examData);
+                        forceAutoSave();
+                    } finally {
+                        cloudApplyingRemote = false;
+                    }
+                    cloudShareId = roomId;
+                    cloudRef = ref;
+                    setAdminTrust(roomId, {});
+                    await saveLinkEntryToLibrary(roomId, { pulledAt: Date.now(), title: examData.filename, filename: examData.filename });
+                    cloudSetStatus('📥 Đã lấy dữ liệu mới nhất từ kho Firebase về admin và lưu local. Không đẩy đè ngược lên kho.', 'online');
+                    updateCloudSyncUI();
+                } catch (err) {
+                    console.error(err);
+                    cloudSetStatus('Không lấy được dữ liệu kho về: ' + (err.message || err), 'error');
+                }
+            }
+
+            const originalStartCloudRoomFinal = startCloudRoomForCurrentExam;
+            startCloudRoomForCurrentExam = async function() {
+                if (!cloudShareFeatureGuard('tạo link cloud')) return;
+                try { ensureCloudFirebaseReady(); } catch (err) { alert('Chưa tạo được link: ' + (err.message || err)); return; }
+                if (!currentExamId) currentExamId = generateId();
+                const roomId = cloudSanitizeExamId(currentExamId || generateId());
+                try {
+                    const existing = await cloudDb.ref(`${CLOUD_SYNC_PATH}/${roomId}`).once('value');
+                    if (existing.exists()) {
+                        const openOnly = confirm('Mã/link này đã có dữ liệu trên Firebase.\n\nĐể tránh đẩy đè dữ liệu, hệ thống sẽ KHÔNG upload đề local lên nữa. Bấm OK để truy cập/lấy dữ liệu kho về link này.');
+                        if (!openOnly) return;
+                        setAdminTrust(roomId, { existingAccessAt: Date.now() });
+                        await startCloudRealtimeSync(roomId, { pushCurrent: false, silent: false, openExisting: true });
+                        await saveLinkEntryToLibrary(roomId, { existingAccessAt: Date.now() });
+                        return;
+                    }
+                } catch (_) {}
+                await startCloudRealtimeSync(roomId, { pushCurrent: true, silent: false, firstCreate: true });
+                if (cloudShareId) {
+                    setAdminTrust(cloudShareId, { firstCreatedAt: Date.now() });
+                    await saveLinkEntryToLibrary(cloudShareId, { firstCreatedAt: Date.now() });
+                    setTimeout(copyCloudShareLink, 180);
+                }
+            };
+
+            pushCurrentExamToCloudNow = async function() {
+                if (!cloudShareFeatureGuard('dùng kho lưu trữ Firebase')) return;
+                if (!cloudShareId || !cloudRef) {
+                    return startCloudRoomForCurrentExam();
+                }
+                return pullCurrentCloudSnapshotToAdmin();
+            };
+
+            const originalAdminForcePushFinal = cloudAdminForcePushSnapshotToCloud;
+            cloudAdminForcePushSnapshotToCloud = async function(examData, reason = 'manual') {
+                const res = await originalAdminForcePushFinal(examData, reason);
+                if (!cloudIsShareVisitor() && cloudShareId) {
+                    setAdminTrust(cloudShareId, {});
+                    saveLinkEntryToLibrary(cloudShareId, { pushedAt: Date.now() });
+                }
+                return res;
+            };
+
+            const originalStartRealtimeFinal = startCloudRealtimeSync;
+            startCloudRealtimeSync = async function(id, options = {}) {
+                const roomId = cloudSanitizeExamId(id || cloudShareId || currentExamId || CLOUD_ACCESS_INITIAL_ROOM_ID || '');
+                const res = await originalStartRealtimeFinal(id, options);
+                if (!cloudIsShareVisitor() && roomId) {
+                    setAdminTrust(roomId, { lastConnectedAt: Date.now() });
+                    saveLinkEntryToLibrary(roomId, { lastConnectedAt: Date.now() });
+                }
+                return res;
+            };
+
+            function openCloudPasswordOnlyPanel() {
+                if (!cloudShareFeatureGuard('quản lý mật khẩu cloud')) return;
+                if (!cloudShareId || !cloudRef) {
+                    alert('Chưa mở/tạo link cloud nào. Hãy tạo hoặc truy cập link trước.');
+                    return;
+                }
+                const choice = prompt(
+                    'Ô MẬT KHẨU CLOUD\n\n' +
+                    'Chỉ chứa các mục liên quan đến mật khẩu của link hiện tại.\n\n' +
+                    '1 = Đổi mật khẩu MỞ ĐỀ\n' +
+                    '2 = Đổi mật khẩu CHỈNH SỬA\n' +
+                    '3 = Đổi mật khẩu QUẢN TRỊ\n' +
+                    '4 = Xem lịch sử mật khẩu đã lưu trên máy admin này\n' +
+                    '5 = Xóa mật khẩu/cache đã lưu của link hiện tại\n' +
+                    '6 = Xóa toàn bộ lịch sử mật khẩu cloud đã lưu trên trình duyệt này',
+                    '2'
+                );
+                if (choice === null) return;
+                const c = choice.trim();
+                if (c === '1') return cloudAdminChangePassword('view');
+                if (c === '2') return cloudAdminChangePassword('edit');
+                if (c === '3') return cloudAdminChangePassword('admin');
+                if (c === '4') return cloudShowLocalPasswordHistory();
+                if (c === '5') {
+                    cloudForgetCachedViewPassword(cloudShareId);
+                    cloudClearCachedEditHash(cloudShareId);
+                    try { localStorage.removeItem(cloudLocalPasswordHistoryKey(cloudShareId)); } catch (_) {}
+                    removeAdminTrust(cloudShareId);
+                    alert('Đã xóa mật khẩu/cache local của link hiện tại trên trình duyệt admin này.');
+                    return;
+                }
+                if (c === '6') {
+                    const ok = confirm('Xóa TOÀN BỘ lịch sử mật khẩu cloud đã lưu trên trình duyệt này?');
+                    if (!ok) return;
+                    Object.keys(localStorage).forEach(k => {
+                        if (k.startsWith(CLOUD_PLAIN_PASSWORD_HISTORY_PREFIX) || k.startsWith(CLOUD_SYNC_VIEW_PASSWORD_CACHE_PREFIX) || k.startsWith(CLOUD_SYNC_PASSWORD_CACHE_PREFIX) || k.startsWith(CLOUD_SYNC_ADMIN_CACHE_PREFIX) || k.startsWith(TRUST_PREFIX)) localStorage.removeItem(k);
+                    });
+                    alert('Đã xóa toàn bộ lịch sử mật khẩu/cache cloud local trên trình duyệt này.');
+                    return;
+                }
+                alert('Lựa chọn không hợp lệ.');
+            }
+
+            unlockCloudEditing = async function() {
+                if (cloudIsShareVisitor()) return cloudOriginalUnlockCloudEditing();
+                return openCloudPasswordOnlyPanel();
+            };
+
+            manageCloudPasswords = async function() {
+                if (cloudIsShareVisitor()) return;
+                if (!cloudShareId || !cloudRef) {
+                    const c = prompt('Chưa mở link cloud nào.\n\n1 = Mở thư viện link đã tạo\n2 = Tạo link cloud lần đầu cho đề hiện tại', '1');
+                    if (c === '1') return openCloudLinkLibrary();
+                    if (c === '2') return startCloudRoomForCurrentExam();
+                    return;
+                }
+                const cloudEnabled = cloudSecurityFlag('cloudEnabled', true) !== false;
+                const shareEnabled = cloudSecurityFlag('shareEnabled', true) !== false && !cloudSecurityFlag('revoked', false);
+                const choice = prompt(
+                    'QUẢN LÝ LINK / KHÓA TRẠNG THÁI\n\n' +
+                    'Đã tách các mục mật khẩu sang nút “🔑 Mật khẩu”.\n\n' +
+                    'Trạng thái hiện tại:\n' +
+                    '- Link share: ' + (shareEnabled ? 'ĐANG BẬT' : 'ĐANG TẮT / KHÔNG TỒN TẠI') + '\n' +
+                    '- Cloud chỉnh sửa cho người truy cập: ' + (cloudEnabled ? 'ĐANG BẬT' : 'ĐANG TẮT, chỉ xem') + '\n\n' +
+                    '1 = Bật/tắt CLOUD chỉnh sửa cho người truy cập\n' +
+                    '2 = Bật/tắt LINK SHARE đề chung\n' +
+                    '3 = Tạo LINK MỚI và vô hiệu hóa link cũ\n' +
+                    '4 = Mở THƯ VIỆN LINK đã tạo\n' +
+                    '5 = Xóa VĨNH CỬU link hiện tại khỏi Firebase',
+                    '4'
+                );
+                if (choice === null) return;
+                const c = choice.trim();
+                if (c === '1') return toggleCloudActiveForVisitors();
+                if (c === '2') return cloudAdminSetShareEnabled(!shareEnabled);
+                if (c === '3') return cloudAdminCreateNewLinkAndRevokeOld();
+                if (c === '4') return openCloudLinkLibrary();
+                if (c === '5') return deleteLinkPermanently(cloudShareId);
+                alert('Lựa chọn không hợp lệ.');
+            };
+
+            const originalAdminCreateNewLinkFinal = cloudAdminCreateNewLinkAndRevokeOld;
+            cloudAdminCreateNewLinkAndRevokeOld = async function() {
+                const oldId = cloudShareId;
+                const res = await originalAdminCreateNewLinkFinal();
+                if (oldId) {
+                    removeLocalLinkEntry(oldId);
+                    try { if (cloudDb) await cloudDb.ref(`${LINK_LIBRARY_PATH}/${oldId}`).remove(); } catch (_) {}
+                }
+                if (cloudShareId) {
+                    setAdminTrust(cloudShareId, { firstCreatedAt: Date.now() });
+                    await saveLinkEntryToLibrary(cloudShareId, { firstCreatedAt: Date.now() });
+                }
+                return res;
+            };
+
+            const originalUpdateCloudSyncUIFinal = updateCloudSyncUI;
+            updateCloudSyncUI = function() {
+                originalUpdateCloudSyncUIFinal();
+                installFinalCss();
+                const editBtn = document.getElementById('cloud-btn-editpass');
+                if (editBtn && !cloudIsShareVisitor()) {
+                    editBtn.textContent = '🔑 Mật khẩu';
+                    editBtn.title = 'Chỉ quản lý các mục liên quan đến mật khẩu.';
+                    editBtn.onclick = openCloudPasswordOnlyPanel;
+                }
+                const manageBtn = document.getElementById('cloud-btn-manage');
+                if (manageBtn && !cloudIsShareVisitor()) {
+                    manageBtn.textContent = '🛡️ Quản lý link';
+                    manageBtn.title = 'Quản lý trạng thái link/cloud và thư viện link. Không chứa mục đổi mật khẩu.';
+                    manageBtn.onclick = manageCloudPasswords;
+                }
+                const pushBtn = document.getElementById('cloud-btn-push');
+                if (pushBtn && !cloudIsShareVisitor()) {
+                    pushBtn.textContent = cloudShareId ? '📥 Lấy dữ liệu kho về' : '💾 Đẩy lên kho lần đầu';
+                    pushBtn.title = cloudShareId ? 'Không đẩy đè dữ liệu. Chỉ lấy dữ liệu mới nhất trên Firebase về admin/local.' : 'Chỉ dùng lần đầu khi tạo link để đưa đề local lên Firebase.';
+                    pushBtn.onclick = pushCurrentExamToCloudNow;
+                }
+                const copyBtn = document.getElementById('cloud-btn-copy');
+                const row = copyBtn ? copyBtn.parentElement : document.querySelector('#cloud-sync-panel .cloud-sync-actions');
+                if (row && !document.getElementById('cloud-btn-library') && !cloudIsShareVisitor()) {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.id = 'cloud-btn-library';
+                    btn.setAttribute('data-cloud-action', 'library');
+                    btn.textContent = '📚 Thư viện link';
+                    btn.onclick = openCloudLinkLibrary;
+                    if (copyBtn && copyBtn.nextSibling) row.insertBefore(btn, copyBtn.nextSibling);
+                    else row.appendChild(btn);
+                }
+            };
+
+            window.openCloudLinkLibrary = openCloudLinkLibrary;
+            window.closeCloudLinkLibrary = closeCloudLinkLibrary;
+            window.accessLinkFromLibrary = accessLinkFromLibrary;
+            window.deleteLinkPermanently = deleteLinkPermanently;
+            window.pullCurrentCloudSnapshotToAdmin = pullCurrentCloudSnapshotToAdmin;
+            window.openCloudPasswordOnlyPanel = openCloudPasswordOnlyPanel;
+
+            installFinalCss();
+            setTimeout(updateCloudSyncUI, 0);
+        })();
+
+        // ==========================================
+        // FINAL PATCH 2026-06-03B: PHẠM VI ĐỒNG BỘ ĐÚNG THEO LINK + FIREBASE
+        // - LocalStorage chỉ dùng để nhớ đề local/quyền/mật khẩu theo từng trình duyệt/tài khoản Google/Chrome profile.
+        // - Dữ liệu đề của LINK đang mở vẫn tự đồng bộ 2 chiều qua Firebase giữa admin và người truy cập.
+        // - Không tự đẩy nhầm một đề local khác lên link cloud đang mở.
+        // - Nếu admin mở đề local khác mã link, web tự tách khỏi cloud link cũ để tránh lẫn dữ liệu.
+        // ==========================================
+        (function installScopedSameLinkFirebaseSyncFix() {
+            if (window.__scopedSameLinkFirebaseSyncFixInstalled) return;
+            window.__scopedSameLinkFirebaseSyncFixInstalled = true;
+
+            function safeRoomIdValue(value) {
+                try { return cloudSanitizeExamId(value || ''); } catch (_) { return String(value || '').trim(); }
+            }
+
+            function currentLocalExamBelongsToCloudRoom(examId = currentExamId, roomId = cloudShareId) {
+                const current = safeRoomIdValue(examId || '');
+                const room = safeRoomIdValue(roomId || '');
+                if (!room) return true;
+                if (!current) return true;
+                return current === room;
+            }
+
+            function detachCloudRoomBecauseLocalChanged(nextExamId = currentExamId) {
+                const room = safeRoomIdValue(cloudShareId || '');
+                const next = safeRoomIdValue(nextExamId || '');
+                if (!room || !next || next === room) return false;
+                try { if (cloudRef && typeof cloudRef.off === 'function') cloudRef.off(); } catch (_) {}
+                cloudRef = null;
+                cloudShareId = null;
+                cloudSaveTimeout && clearTimeout(cloudSaveTimeout);
+                cloudSaveTimeout = null;
+                cloudRoomSecurity = null;
+                cloudReadOnlyMode = false;
+                cloudRoomIsEncrypted = false;
+                cloudLastLocalPayloadFingerprint = '';
+                cloudLastRemotePayloadFingerprint = '';
+                cloudLastRemoteSecurityFingerprint = '';
+                cloudSetStatus('📌 Đã mở đề local khác mã link cloud cũ. Web đã tách khỏi link cũ để không đồng bộ nhầm dữ liệu. Muốn đồng bộ lại, hãy mở đúng link trong “📚 Thư viện link”.', '');
+                updateCloudSyncUI();
+                return true;
+            }
+
+            const originalCloudQueueSaveScopedSameLink = cloudQueueSave;
+            cloudQueueSave = function(examData) {
+                if (cloudShareId && !cloudApplyingRemote) {
+                    const examId = examData && examData.id ? examData.id : currentExamId;
+                    if (!currentLocalExamBelongsToCloudRoom(examId, cloudShareId)) {
+                        cloudSetStatus('🔒 Không tự đồng bộ: đề local đang mở khác mã link Firebase hiện tại. Dữ liệu chỉ lưu trên máy này.', 'error');
+                        return;
+                    }
+                }
+                return originalCloudQueueSaveScopedSameLink(examData);
+            };
+
+            const originalForceAutoSaveScopedSameLink = forceAutoSave;
+            forceAutoSave = function() {
+                const result = originalForceAutoSaveScopedSameLink();
+                // Ghi rõ lại trạng thái để tránh hiểu nhầm: nếu đúng mã link thì autoSave vẫn đẩy Firebase qua cloudQueueSave gốc.
+                if (cloudShareId && currentLocalExamBelongsToCloudRoom(currentExamId, cloudShareId) && !cloudApplyingRemote && cloudCanWriteToCurrentRoom && cloudCanWriteToCurrentRoom()) {
+                    cloudSetStatus('🔄 Đề local này đang cùng mã link cloud. Thay đổi sẽ tự đồng bộ 2 chiều qua Firebase.', 'online');
+                }
+                return result;
+            };
+
+            const originalLoadExamDataScopedSameLink = loadExamData;
+            loadExamData = function(examData) {
+                if (!cloudApplyingRemote && examData && examData.id) {
+                    detachCloudRoomBecauseLocalChanged(examData.id);
+                }
+                return originalLoadExamDataScopedSameLink(examData);
+            };
+
+            const originalCreateNewExamScopedSameLink = createNewExam;
+            createNewExam = function() {
+                if (!cloudApplyingRemote && cloudShareId) {
+                    try { if (cloudRef && typeof cloudRef.off === 'function') cloudRef.off(); } catch (_) {}
+                    cloudRef = null;
+                    cloudShareId = null;
+                    cloudRoomSecurity = null;
+                    cloudReadOnlyMode = false;
+                    cloudRoomIsEncrypted = false;
+                    cloudSetStatus('📝 Đã tạo đề local mới. Đề này chưa gắn với link Firebase nào.', '');
+                    updateCloudSyncUI();
+                }
+                return originalCreateNewExamScopedSameLink();
+            };
+
+            const originalPushCurrentExamToCloudNowScopedSameLink = pushCurrentExamToCloudNow;
+            pushCurrentExamToCloudNow = async function() {
+                if (cloudShareId && currentExamId && !currentLocalExamBelongsToCloudRoom(currentExamId, cloudShareId)) {
+                    return pullCurrentCloudSnapshotToAdmin();
+                }
+                return originalPushCurrentExamToCloudNowScopedSameLink();
+            };
+
+            const originalUpdateCloudSyncUIScopedSameLink = updateCloudSyncUI;
+            updateCloudSyncUI = function() {
+                originalUpdateCloudSyncUIScopedSameLink();
+                const pushBtn = document.getElementById('cloud-btn-push');
+                if (pushBtn && !cloudIsShareVisitor()) {
+                    if (cloudShareId && currentLocalExamBelongsToCloudRoom(currentExamId, cloudShareId)) {
+                        pushBtn.textContent = '📥 Lấy dữ liệu kho về';
+                        pushBtn.title = 'Nút này chỉ lấy dữ liệu Firebase về. Còn thay đổi trên đúng link vẫn tự đồng bộ 2 chiều qua Firebase.';
+                    } else if (cloudShareId) {
+                        pushBtn.textContent = '📥 Lấy đúng link về';
+                        pushBtn.title = 'Đề local hiện khác mã link đang nhớ, nên chỉ cho lấy dữ liệu đúng link về để tránh đẩy nhầm.';
+                    }
+                }
+            };
+
+            window.currentLocalExamBelongsToCloudRoom = currentLocalExamBelongsToCloudRoom;
+            window.detachCloudRoomBecauseLocalChanged = detachCloudRoomBecauseLocalChanged;
+        })();
+
         let savedExams = JSON.parse(localStorage.getItem('examStorageJLPT_v8')) || [];
         if (savedExams.length === 0) {
             let oldStorage = JSON.parse(localStorage.getItem('examStorageJLPT')) || [];
