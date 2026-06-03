@@ -14201,6 +14201,215 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
             window.detachCloudRoomBecauseLocalChanged = detachCloudRoomBecauseLocalChanged;
         })();
 
+
+
+        // ==========================================
+        // FINAL PATCH 2026-06-03C: ADMIN KHÔNG CẦN NHẬP LẠI MẬT KHẨU SỬA / QUẢN TRỊ
+        // - Người truy cập link vẫn phải nhập mật khẩu theo cơ chế cũ.
+        // - Admin trên cùng trình duyệt/kho Firebase được tự cấp quyền sửa + quản trị cho link đã tạo/mở.
+        // - Không dùng fcfg của link lạ để tự nhận là admin; chỉ tin khi có config Firebase local/static hoặc room đã được admin lưu.
+        // ==========================================
+        (function installAdminAutoPrivilegeNoPasswordFix() {
+            if (window.__adminAutoPrivilegeNoPasswordFixInstalled) return;
+            window.__adminAutoPrivilegeNoPasswordFixInstalled = true;
+
+            function safeExamIdForAdminPrivilege(value) {
+                try { return cloudSanitizeExamId(value || ''); }
+                catch (_) { return String(value || '').trim(); }
+            }
+
+            function hasAdminSideFirebaseConfigLocal() {
+                try {
+                    const localCfg = JSON.parse(localStorage.getItem(CLOUD_SYNC_LOCAL_CONFIG_KEY) || 'null');
+                    if (cloudFirebaseConfigLooksValid(localCfg)) return true;
+                } catch (_) {}
+                try { if (cloudFirebaseConfigLooksValid(CLOUD_SYNC_FIREBASE_CONFIG)) return true; } catch (_) {}
+                return false;
+            }
+
+            function roomLooksOwnedByThisAdminBrowser(roomId) {
+                const id = safeExamIdForAdminPrivilege(roomId || cloudShareId || CLOUD_ACCESS_INITIAL_ROOM_ID || currentExamId || '');
+                if (!id) return false;
+
+                // Admin ở URL gốc không có ?exam= luôn là trang quản trị.
+                if (!CLOUD_ACCESS_INITIAL_ROOM_ID) return true;
+
+                // Khi mở link có ?exam=, chỉ nâng lên quyền admin nếu trình duyệt này đã từng lưu room đó
+                // hoặc có đúng dữ liệu local/admin gần nhất. Người truy cập máy khác sẽ không có các khóa này.
+                const initial = safeExamIdForAdminPrivilege(CLOUD_ACCESS_INITIAL_ROOM_ID || '');
+                if (initial && initial !== id) return false;
+
+                let active = '';
+                let last = '';
+                try { active = safeExamIdForAdminPrivilege(localStorage.getItem(CLOUD_SYNC_ADMIN_ACTIVE_ROOM_KEY) || ''); } catch (_) {}
+                try { last = safeExamIdForAdminPrivilege(localStorage.getItem(CLOUD_SYNC_LAST_EXAM_KEY) || ''); } catch (_) {}
+                const cur = safeExamIdForAdminPrivilege(currentExamId || '');
+
+                if ((active === id || last === id || cur === id) && hasAdminSideFirebaseConfigLocal()) return true;
+
+                // Nếu các bản vá trước đã đánh dấu trusted thì cloudIsShareVisitor gốc đã trả false; đoạn này chỉ là lớp dự phòng.
+                return false;
+            }
+
+            const previousCloudIsShareVisitorAutoPrivilege = cloudIsShareVisitor;
+            cloudIsShareVisitor = function() {
+                const initial = safeExamIdForAdminPrivilege(CLOUD_ACCESS_INITIAL_ROOM_ID || '');
+                if (!initial) return false;
+                try {
+                    if (previousCloudIsShareVisitorAutoPrivilege && previousCloudIsShareVisitorAutoPrivilege() === false) return false;
+                } catch (_) {}
+                if (roomLooksOwnedByThisAdminBrowser(initial)) return false;
+                return true;
+            };
+            window.cloudIsShareVisitor = cloudIsShareVisitor;
+
+            function grantAdminPrivilegeFromSecurity(roomId = cloudShareId, security = cloudRoomSecurity) {
+                if (typeof cloudIsShareVisitor === 'function' && cloudIsShareVisitor()) return false;
+                const id = safeExamIdForAdminPrivilege(roomId || cloudShareId || currentExamId || CLOUD_ACCESS_INITIAL_ROOM_ID || '');
+                const sec = security || cloudRoomSecurity || null;
+                if (!id || !sec || typeof sec !== 'object') return false;
+
+                let changed = false;
+
+                // Admin đã tạo/mở đúng room trên trình duyệt này: dùng chính hash trong _security làm token local.
+                // Nhờ vậy không còn hiện “thiếu mật khẩu sửa / chưa mở quản trị” ở trang admin.
+                if (sec.editHash) {
+                    const editHash = String(sec.editHash);
+                    if (cloudEditHash !== editHash) {
+                        cloudEditHash = editHash;
+                        changed = true;
+                    }
+                    try { cloudSetCachedEditHash(id, editHash); } catch (_) {}
+                }
+
+                if (sec.adminHash) {
+                    const adminHash = String(sec.adminHash);
+                    if (cloudAdminHash !== adminHash) {
+                        cloudAdminHash = adminHash;
+                        changed = true;
+                    }
+                    try { cloudSetCachedAdminHash(id, adminHash); } catch (_) {}
+                }
+
+                if (sec.editLocked !== true) {
+                    cloudReadOnlyMode = false;
+                }
+
+                // Đồng bộ thêm trạng thái room admin để lần mở tab sau vẫn nhận diện là admin của room này.
+                try {
+                    localStorage.setItem(CLOUD_SYNC_LAST_EXAM_KEY, id);
+                    localStorage.setItem(CLOUD_SYNC_ADMIN_ACTIVE_ROOM_KEY, id);
+                    if (typeof cloudPersistAdminRoomState === 'function') cloudPersistAdminRoomState(id, sec);
+                } catch (_) {}
+
+                return changed;
+            }
+
+            const previousCloudApplySecurityAutoPrivilege = cloudApplySecurityFromRemote;
+            cloudApplySecurityFromRemote = function(val, roomId) {
+                previousCloudApplySecurityAutoPrivilege(val, roomId);
+                grantAdminPrivilegeFromSecurity(roomId, cloudRoomSecurity);
+                cloudReadOnlyMode = !cloudCanWriteToCurrentRoom();
+            };
+
+            const previousCloudCanWriteAutoPrivilege = cloudCanWriteToCurrentRoom;
+            cloudCanWriteToCurrentRoom = function() {
+                grantAdminPrivilegeFromSecurity(cloudShareId, cloudRoomSecurity);
+                if (typeof cloudIsShareVisitor === 'function' && !cloudIsShareVisitor()) {
+                    const requiredHash = cloudRequiredEditHash();
+                    return Boolean(cloudShareId && requiredHash && cloudEditHash === requiredHash && !(cloudRoomSecurity && cloudRoomSecurity.editLocked));
+                }
+                return previousCloudCanWriteAutoPrivilege();
+            };
+
+            const previousCloudCanAdminAutoPrivilege = cloudCanAdminCurrentRoom;
+            cloudCanAdminCurrentRoom = function() {
+                grantAdminPrivilegeFromSecurity(cloudShareId, cloudRoomSecurity);
+                if (typeof cloudIsShareVisitor === 'function' && !cloudIsShareVisitor()) {
+                    const requiredHash = cloudRequiredAdminHash();
+                    return Boolean(cloudShareId && requiredHash && cloudAdminHash === requiredHash);
+                }
+                return previousCloudCanAdminAutoPrivilege();
+            };
+
+            const previousUnlockCloudEditingAutoPrivilege = unlockCloudEditing;
+            unlockCloudEditing = async function() {
+                if (typeof cloudIsShareVisitor === 'function' && !cloudIsShareVisitor()) {
+                    if (!cloudShareId) {
+                        alert('Chưa mở/tạo link cloud nào. Hãy tạo hoặc truy cập link trước.');
+                        return false;
+                    }
+                    grantAdminPrivilegeFromSecurity(cloudShareId, cloudRoomSecurity);
+                    cloudReadOnlyMode = !cloudCanWriteToCurrentRoom();
+                    updateCloudSyncUI();
+                    cloudSetStatus(cloudCanWriteToCurrentRoom()
+                        ? '🛡️ Admin đã được tự mở quyền chỉnh sửa cloud, không cần nhập mật khẩu sửa.'
+                        : '⛔ Link này đang bị khóa chỉnh sửa tạm thời.', cloudCanWriteToCurrentRoom() ? 'online' : 'error');
+                    return cloudCanWriteToCurrentRoom();
+                }
+                return previousUnlockCloudEditingAutoPrivilege();
+            };
+
+            const previousCloudUnlockAdminAutoPrivilege = cloudUnlockAdmin;
+            cloudUnlockAdmin = async function() {
+                if (typeof cloudIsShareVisitor === 'function' && !cloudIsShareVisitor()) {
+                    grantAdminPrivilegeFromSecurity(cloudShareId, cloudRoomSecurity);
+                    updateCloudSyncUI();
+                    if (cloudCanAdminCurrentRoom()) return true;
+                }
+                return previousCloudUnlockAdminAutoPrivilege();
+            };
+
+            const previousStartRealtimeAutoPrivilege = startCloudRealtimeSync;
+            startCloudRealtimeSync = async function(id, options = {}) {
+                const roomId = safeExamIdForAdminPrivilege(id || cloudShareId || currentExamId || CLOUD_ACCESS_INITIAL_ROOM_ID || '');
+                const result = await previousStartRealtimeAutoPrivilege(id, options);
+                if (roomId && typeof cloudIsShareVisitor === 'function' && !cloudIsShareVisitor()) {
+                    grantAdminPrivilegeFromSecurity(roomId, cloudRoomSecurity);
+                    updateCloudSyncUI();
+                }
+                return result;
+            };
+
+            const previousPushSnapshotAutoPrivilege = pushSnapshotToCloud;
+            pushSnapshotToCloud = async function(examData, reason = 'auto') {
+                if (typeof cloudIsShareVisitor === 'function' && !cloudIsShareVisitor()) {
+                    grantAdminPrivilegeFromSecurity(cloudShareId, cloudRoomSecurity);
+                }
+                return previousPushSnapshotAutoPrivilege(examData, reason);
+            };
+
+            const previousUpdateCloudSyncUIAutoPrivilege = updateCloudSyncUI;
+            updateCloudSyncUI = function() {
+                if (cloudShareId && typeof cloudIsShareVisitor === 'function' && !cloudIsShareVisitor()) {
+                    grantAdminPrivilegeFromSecurity(cloudShareId, cloudRoomSecurity);
+                }
+                previousUpdateCloudSyncUIAutoPrivilege();
+                const shareEl = document.getElementById('cloud-share-id');
+                if (shareEl && cloudShareId && typeof cloudIsShareVisitor === 'function' && !cloudIsShareVisitor()) {
+                    const lines = shareEl.innerHTML;
+                    if (/Thiếu mật khẩu sửa|Chưa mở quản trị/.test(lines) && cloudRoomSecurity) {
+                        const lockState = cloudCanWriteToCurrentRoom()
+                            ? '🔓 Admin đã tự mở quyền sửa cloud'
+                            : (cloudRoomSecurity && cloudRoomSecurity.editLocked ? '⛔ Đang khóa chỉnh sửa' : '🔒 Chưa có quyền sửa');
+                        const encState = cloudRoomIsEncrypted || (cloudRoomSecurity && cloudRoomSecurity.encrypted)
+                            ? (cloudViewPassword ? '🔐 Đề đã mã hóa, máy admin đã mở xem' : '🔐 Đề đã mã hóa')
+                            : '⚠️ Đề cloud cũ/chưa mã hóa';
+                        const adminState = cloudCanAdminCurrentRoom() ? '🛡️ Admin đã tự mở quản trị' : '🛡️ Chưa có quyền quản trị';
+                        shareEl.innerHTML = `<b>Mã đề:</b> ${escapeHtml(cloudShareId)}<br><b>Link:</b> ${escapeHtml(makeCloudShareUrl(cloudShareId))}<br><b>Bảo vệ:</b> ${escapeHtml(encState)}<br><b>Chỉnh sửa:</b> ${escapeHtml(lockState)}<br><b>Quản trị:</b> ${escapeHtml(adminState)}`;
+                    }
+                }
+            };
+
+            window.grantAdminPrivilegeFromSecurity = grantAdminPrivilegeFromSecurity;
+            setTimeout(() => {
+                try {
+                    grantAdminPrivilegeFromSecurity(cloudShareId || CLOUD_ACCESS_INITIAL_ROOM_ID || currentExamId, cloudRoomSecurity);
+                    updateCloudSyncUI();
+                } catch (_) {}
+            }, 0);
+        })();
+
         let savedExams = JSON.parse(localStorage.getItem('examStorageJLPT_v8')) || [];
         if (savedExams.length === 0) {
             let oldStorage = JSON.parse(localStorage.getItem('examStorageJLPT')) || [];
