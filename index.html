@@ -14410,6 +14410,103 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
             }, 0);
         })();
 
+
+        // ==========================================
+        // FIX 2026-06-03: Chống treo mãi ở màn hình "Đang kiểm tra link đề" trên máy người truy cập.
+        // - Máy khác phải đọc được Firebase bằng fcfg trên URL.
+        // - Nếu Firebase / rules / mạng không phản hồi, phải hiện lỗi rõ ràng thay vì đứng mãi.
+        // - Nếu listener realtime bị chậm, dùng thêm fetch một lần để chuyển nhanh sang màn hình nhập mật khẩu.
+        // ==========================================
+        (function installCloudShareVisitorStuckGuardFinal() {
+            if (window.__cloudShareVisitorStuckGuardFinalInstalled) return;
+            window.__cloudShareVisitorStuckGuardFinalInstalled = true;
+
+            let visitorStuckHardTimer = null;
+            let visitorDirectFetchBusy = false;
+
+            function clearVisitorStuckHardTimer() {
+                if (visitorStuckHardTimer) {
+                    clearTimeout(visitorStuckHardTimer);
+                    visitorStuckHardTimer = null;
+                }
+            }
+
+            function getVisitorRoomIdSafe(id) {
+                try {
+                    return cloudSanitizeExamId(id || cloudShareId || currentExamId || CLOUD_ACCESS_INITIAL_ROOM_ID || cloudGetExamIdFromUrl() || '');
+                } catch (_) {
+                    return String(id || cloudShareId || currentExamId || CLOUD_ACCESS_INITIAL_ROOM_ID || '').trim();
+                }
+            }
+
+            async function visitorDirectFetchRoomOnce(roomId, label) {
+                if (visitorDirectFetchBusy) return;
+                if (!(typeof cloudIsShareVisitor === 'function' && cloudIsShareVisitor())) return;
+                if (!roomId || cloudAccessLastMode !== 'connecting') return;
+
+                visitorDirectFetchBusy = true;
+                try {
+                    if (!getCloudFirebaseConfig()) {
+                        throw new Error('Missing Firebase config. Link share thiếu fcfg nên máy người truy cập không biết kết nối Firebase nào.');
+                    }
+                    const val = await cloudVisitorFetchValueOnce(roomId, 7000);
+                    if (cloudAccessLastMode === 'connecting') {
+                        await cloudVisitorProcessRemoteValue(val, roomId, label || 'direct-fetch');
+                    }
+                } catch (err) {
+                    if (cloudAccessLastMode === 'connecting') {
+                        cloudShowShareVisitorConnectError(err, roomId);
+                    }
+                } finally {
+                    visitorDirectFetchBusy = false;
+                }
+            }
+
+            const previousCloudSetAccessGuardStuckGuard = cloudSetAccessGuard;
+            cloudSetAccessGuard = function(mode, opts = {}) {
+                if (mode !== 'connecting') clearVisitorStuckHardTimer();
+                return previousCloudSetAccessGuardStuckGuard(mode, opts);
+            };
+
+            const previousCloudHideAccessGuardStuckGuard = cloudHideAccessGuard;
+            cloudHideAccessGuard = function() {
+                clearVisitorStuckHardTimer();
+                return previousCloudHideAccessGuardStuckGuard.apply(this, arguments);
+            };
+
+            const previousStartCloudRealtimeSyncStuckGuard = startCloudRealtimeSync;
+            startCloudRealtimeSync = async function(id, options = {}) {
+                const isVisitor = typeof cloudIsShareVisitor === 'function' && cloudIsShareVisitor();
+                const roomId = getVisitorRoomIdSafe(id);
+
+                if (isVisitor && roomId) {
+                    try { cloudPrepareShareAccessUI(); } catch (_) {}
+
+                    clearVisitorStuckHardTimer();
+                    visitorStuckHardTimer = setTimeout(() => {
+                        if (typeof cloudIsShareVisitor === 'function' && cloudIsShareVisitor() && cloudAccessLastMode === 'connecting') {
+                            cloudShowShareVisitorConnectError(new Error(
+                                'Firebase không phản hồi sau 12 giây. Link có thể thiếu/sai fcfg, Realtime Database chưa bật, Rules chưa cho đọc, mạng đang chặn firebaseio.com, hoặc link cũ đã bị admin đổi.'
+                            ), roomId);
+                        }
+                    }, 12000);
+
+                    // Fetch nhanh một lần, không chờ listener realtime. Giúp máy khác hiện ô mật khẩu nhanh hơn.
+                    setTimeout(() => visitorDirectFetchRoomOnce(roomId, 'quick-check-1'), 1200);
+                    setTimeout(() => visitorDirectFetchRoomOnce(roomId, 'quick-check-2'), 4200);
+                }
+
+                const result = await previousStartCloudRealtimeSyncStuckGuard.apply(this, arguments);
+
+                if (isVisitor && roomId) {
+                    setTimeout(() => visitorDirectFetchRoomOnce(roomId, 'after-listener-start'), 2200);
+                }
+
+                return result;
+            };
+        })();
+
+
         let savedExams = JSON.parse(localStorage.getItem('examStorageJLPT_v8')) || [];
         if (savedExams.length === 0) {
             let oldStorage = JSON.parse(localStorage.getItem('examStorageJLPT')) || [];
@@ -15634,6 +15731,366 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
                 }, 100);
             });
         }
+
+
+        // ==========================================
+        // FINAL PATCH 2026-06-03D: NHỚ TRẠNG THÁI BẢNG 🌐 CHỈNH SỬA CHUNG THEO TỪNG ĐỀ
+        // - Mỗi đề local sẽ có trạng thái Cloud/Link riêng trong localStorage.
+        // - Tạo đề mới sẽ không làm mất trạng thái link của đề cũ.
+        // - Khi mở lại đề cũ từ kho đề, bảng 🌐 Chỉnh sửa chung tự quay về link/trạng thái cuối cùng và tự kết nối lại Firebase nếu có thể.
+        // ==========================================
+        (function installCloudPanelStatePerExamMemory() {
+            if (window.__cloudPanelStatePerExamMemoryInstalled) return;
+            window.__cloudPanelStatePerExamMemoryInstalled = true;
+
+            const CLOUD_PANEL_STATE_PREFIX = 'jlpt_cloud_panel_state_by_exam_v1_';
+            const CLOUD_PANEL_STATE_INDEX_KEY = 'jlpt_cloud_panel_state_index_v1';
+            const CLOUD_PANEL_STATE_MAX = 300;
+
+            function cloudPanelIsVisitorSafe() {
+                try { return typeof cloudIsShareVisitor === 'function' && cloudIsShareVisitor(); } catch (_) { return false; }
+            }
+
+            function cloudPanelSafeExamId(value) {
+                try {
+                    if (typeof cloudSanitizeExamId === 'function') return cloudSanitizeExamId(value || '');
+                } catch (_) {}
+                return String(value || '').trim();
+            }
+
+            function cloudPanelStateKey(examId) {
+                return CLOUD_PANEL_STATE_PREFIX + cloudPanelSafeExamId(examId || '');
+            }
+
+            function cloudPanelJsonParse(text, fallback) {
+                try { return text ? JSON.parse(text) : fallback; } catch (_) { return fallback; }
+            }
+
+            function cloudPanelStatusTypeFromDom() {
+                const el = document.getElementById('cloud-sync-status');
+                if (!el) return '';
+                if (el.classList.contains('online')) return 'online';
+                if (el.classList.contains('saving')) return 'saving';
+                if (el.classList.contains('error')) return 'error';
+                return '';
+            }
+
+            function cloudPanelCompactSecurity(sec) {
+                if (!sec || typeof sec !== 'object') return null;
+                return {
+                    cloudEnabled: sec.cloudEnabled !== false,
+                    shareEnabled: sec.shareEnabled !== false,
+                    revoked: sec.revoked === true,
+                    editLocked: sec.editLocked === true,
+                    encrypted: sec.encrypted === true,
+                    revision: String(sec.revision || '1'),
+                    updatedAt: Number(sec.updatedAt || 0) || 0
+                };
+            }
+
+            function cloudPanelCurrentFirebaseScope() {
+                try {
+                    if (typeof currentFirebaseScopeForRuntime === 'function') return currentFirebaseScopeForRuntime();
+                } catch (_) {}
+                try {
+                    const cfg = typeof getCloudFirebaseConfig === 'function' ? getCloudFirebaseConfig() : null;
+                    if (cfg && cfg.projectId && cfg.databaseURL) return String(cfg.projectId) + '|' + String(cfg.databaseURL);
+                } catch (_) {}
+                return '';
+            }
+
+            function cloudPanelMakeShareUrl(roomId) {
+                try {
+                    if (roomId && typeof makeCloudShareUrl === 'function') return makeCloudShareUrl(roomId);
+                } catch (_) {}
+                return '';
+            }
+
+            function cloudPanelGetIndex() {
+                return cloudPanelJsonParse(localStorage.getItem(CLOUD_PANEL_STATE_INDEX_KEY), []) || [];
+            }
+
+            function cloudPanelTouchIndex(examId) {
+                const id = cloudPanelSafeExamId(examId || '');
+                if (!id) return;
+                const list = cloudPanelGetIndex().filter(item => item && item.id !== id);
+                list.unshift({ id, updatedAt: Date.now() });
+                const trimmed = list.slice(0, CLOUD_PANEL_STATE_MAX);
+                try { localStorage.setItem(CLOUD_PANEL_STATE_INDEX_KEY, JSON.stringify(trimmed)); } catch (_) {}
+                list.slice(CLOUD_PANEL_STATE_MAX).forEach(item => {
+                    try { localStorage.removeItem(cloudPanelStateKey(item.id)); } catch (_) {}
+                });
+            }
+
+            function cloudPanelReadState(examOrId) {
+                const id = cloudPanelSafeExamId(typeof examOrId === 'object' ? (examOrId && examOrId.id) : examOrId);
+                if (!id) return null;
+                const stored = cloudPanelJsonParse(localStorage.getItem(cloudPanelStateKey(id)), null);
+                if (stored && typeof stored === 'object') return stored;
+                if (examOrId && typeof examOrId === 'object' && examOrId.cloudPanelState && typeof examOrId.cloudPanelState === 'object') return examOrId.cloudPanelState;
+                return null;
+            }
+
+            function cloudPanelWriteStateIntoExamStorage(examId, state) {
+                const id = cloudPanelSafeExamId(examId || '');
+                if (!id || !state) return;
+                try {
+                    const storage = JSON.parse(localStorage.getItem('examStorageJLPT_v8')) || [];
+                    const idx = storage.findIndex(item => item && item.id === id);
+                    if (idx >= 0) {
+                        storage[idx].cloudPanelState = state;
+                        localStorage.setItem('examStorageJLPT_v8', JSON.stringify(storage));
+                    }
+                } catch (_) {}
+            }
+
+            function cloudPanelBuildState(examId = currentExamId, overrides = {}) {
+                const id = cloudPanelSafeExamId(examId || currentExamId || '');
+                if (!id) return null;
+                const old = cloudPanelReadState(id) || {};
+                const statusEl = document.getElementById('cloud-sync-status');
+                const roomId = Object.prototype.hasOwnProperty.call(overrides, 'cloudShareId')
+                    ? cloudPanelSafeExamId(overrides.cloudShareId || '')
+                    : cloudPanelSafeExamId(cloudShareId || old.cloudShareId || '');
+                const security = cloudPanelCompactSecurity(cloudRoomSecurity) || old.roomSecurity || null;
+                const featureEnabled = Object.prototype.hasOwnProperty.call(overrides, 'featureEnabled')
+                    ? Boolean(overrides.featureEnabled)
+                    : Boolean(isCloudShareFeatureEnabled);
+                const state = {
+                    version: 1,
+                    examId: id,
+                    cloudShareId: roomId,
+                    featureEnabled,
+                    hasCloudLink: Boolean(roomId),
+                    roomSecurity: security,
+                    roomIsEncrypted: Boolean(cloudRoomIsEncrypted || (security && security.encrypted)),
+                    readOnlyMode: Boolean(cloudReadOnlyMode),
+                    firebaseScope: cloudPanelCurrentFirebaseScope() || old.firebaseScope || '',
+                    shareUrl: roomId ? (cloudPanelMakeShareUrl(roomId) || old.shareUrl || '') : '',
+                    statusText: statusEl ? String(statusEl.textContent || '').trim() : (old.statusText || ''),
+                    statusType: cloudPanelStatusTypeFromDom() || old.statusType || '',
+                    updatedAt: Date.now(),
+                    updatedAtText: new Date().toLocaleString('vi-VN')
+                };
+                return { ...old, ...state, ...overrides, examId: id, cloudShareId: roomId, featureEnabled };
+            }
+
+            function cloudPanelSaveState(examId = currentExamId, overrides = {}) {
+                if (cloudPanelIsVisitorSafe()) return null;
+                const id = cloudPanelSafeExamId(examId || currentExamId || '');
+                if (!id) return null;
+                const state = cloudPanelBuildState(id, overrides);
+                if (!state) return null;
+                try { localStorage.setItem(cloudPanelStateKey(id), JSON.stringify(state)); } catch (_) {}
+                cloudPanelTouchIndex(id);
+                cloudPanelWriteStateIntoExamStorage(id, state);
+                return state;
+            }
+
+            function cloudPanelCanUseFirebaseNow() {
+                try {
+                    return typeof getCloudFirebaseConfig === 'function'
+                        && typeof cloudFirebaseConfigLooksValid === 'function'
+                        && cloudFirebaseConfigLooksValid(getCloudFirebaseConfig());
+                } catch (_) { return false; }
+            }
+
+            function cloudPanelApplyRememberedStatus(state) {
+                if (!state) return;
+                try {
+                    if (state.statusText) cloudSetStatus(state.statusText, state.statusType || '');
+                } catch (_) {}
+                try { updateCloudSyncUI(); } catch (_) {}
+            }
+
+            function cloudPanelRestoreStateForExam(examOrId, reason = 'load') {
+                if (cloudPanelIsVisitorSafe() || cloudApplyingRemote) return;
+                const id = cloudPanelSafeExamId(typeof examOrId === 'object' ? (examOrId && examOrId.id) : examOrId);
+                if (!id) return;
+                const state = cloudPanelReadState(examOrId) || cloudPanelReadState(id);
+                if (!state) {
+                    try { updateCloudSyncUI(); } catch (_) {}
+                    return;
+                }
+
+                const rememberedFeature = state.featureEnabled !== false;
+                isCloudShareFeatureEnabled = rememberedFeature;
+                try { localStorage.setItem(CLOUD_SHARE_FEATURE_KEY, rememberedFeature ? 'true' : 'false'); } catch (_) {}
+
+                const roomId = cloudPanelSafeExamId(state.cloudShareId || '');
+                if (roomId) {
+                    try { localStorage.setItem(CLOUD_SYNC_LAST_EXAM_KEY, roomId); } catch (_) {}
+                }
+
+                if (!rememberedFeature) {
+                    cloudShareId = roomId || null;
+                    cloudRef = null;
+                    cloudRoomSecurity = state.roomSecurity || null;
+                    cloudRoomIsEncrypted = Boolean(state.roomIsEncrypted || (state.roomSecurity && state.roomSecurity.encrypted));
+                    cloudReadOnlyMode = Boolean(state.readOnlyMode);
+                    cloudPanelApplyRememberedStatus({
+                        ...state,
+                        statusText: state.statusText || '🔕 Trạng thái đã nhớ của đề này: Share đề thi chung đang tắt.',
+                        statusType: state.statusType || ''
+                    });
+                    return;
+                }
+
+                if (!roomId) {
+                    cloudShareId = null;
+                    cloudRef = null;
+                    cloudRoomSecurity = null;
+                    cloudRoomIsEncrypted = false;
+                    cloudReadOnlyMode = false;
+                    try { cloudSetStatus('📌 Đề này chưa gắn với link Firebase nào. Bấm “☁️ Tạo/Bật link” nếu muốn chỉnh sửa chung.', ''); } catch (_) {}
+                    try { updateCloudSyncUI(); } catch (_) {}
+                    return;
+                }
+
+                cloudShareId = roomId;
+                cloudRoomSecurity = state.roomSecurity || cloudRoomSecurity || null;
+                cloudRoomIsEncrypted = Boolean(state.roomIsEncrypted || (cloudRoomSecurity && cloudRoomSecurity.encrypted));
+                cloudReadOnlyMode = Boolean(state.readOnlyMode);
+                try { updateCloudSyncUI(); } catch (_) {}
+
+                if (!cloudPanelCanUseFirebaseNow()) {
+                    cloudPanelApplyRememberedStatus({
+                        ...state,
+                        statusText: '⚠️ Đã nhớ link của đề này, nhưng máy này chưa có Firebase config. Bấm ⚙️ Firebase để dán config rồi web sẽ mở lại trạng thái cloud.',
+                        statusType: 'error'
+                    });
+                    return;
+                }
+
+                try { cloudSetStatus('🔁 Đang khôi phục bảng 🌐 Chỉnh sửa chung của đề này...', 'saving'); } catch (_) {}
+                setTimeout(() => {
+                    if (cloudPanelIsVisitorSafe() || cloudApplyingRemote) return;
+                    if (currentExamId && cloudPanelSafeExamId(currentExamId) !== id) return;
+                    if (cloudRef && cloudPanelSafeExamId(cloudShareId) === roomId) {
+                        cloudPanelSaveState(id);
+                        return;
+                    }
+                    Promise.resolve(startCloudRealtimeSync(roomId, { pushCurrent: false, silent: true }))
+                        .then(() => cloudPanelSaveState(id))
+                        .catch(err => {
+                            console.warn('Không khôi phục được trạng thái cloud theo đề:', err);
+                            try { cloudSetStatus('⚠️ Đã nhớ link của đề này nhưng chưa kết nối lại được Firebase: ' + (err && err.message ? err.message : err), 'error'); } catch (_) {}
+                            cloudPanelSaveState(id);
+                        });
+                }, reason === 'load' ? 180 : 80);
+            }
+
+            const originalCloudPanelForceAutoSave = forceAutoSave;
+            forceAutoSave = function() {
+                const result = originalCloudPanelForceAutoSave.apply(this, arguments);
+                if (!cloudApplyingRemote && !cloudPanelIsVisitorSafe()) cloudPanelSaveState(currentExamId);
+                return result;
+            };
+
+            const originalCloudPanelLoadExamData = loadExamData;
+            loadExamData = function(examData) {
+                if (!cloudApplyingRemote && !cloudPanelIsVisitorSafe()) cloudPanelSaveState(currentExamId);
+                const result = originalCloudPanelLoadExamData.apply(this, arguments);
+                if (!cloudApplyingRemote && !cloudPanelIsVisitorSafe()) {
+                    setTimeout(() => cloudPanelRestoreStateForExam(examData, 'load'), 220);
+                }
+                return result;
+            };
+
+            const originalCloudPanelCreateNewExam = createNewExam;
+            createNewExam = function() {
+                if (!cloudApplyingRemote && !cloudPanelIsVisitorSafe()) cloudPanelSaveState(currentExamId);
+                const result = originalCloudPanelCreateNewExam.apply(this, arguments);
+                setTimeout(() => {
+                    if (!cloudApplyingRemote && !cloudPanelIsVisitorSafe()) {
+                        cloudPanelSaveState(currentExamId, {
+                            cloudShareId: '',
+                            hasCloudLink: false,
+                            statusText: '📝 Đề local mới. Đề này chưa gắn với link Firebase nào.',
+                            statusType: ''
+                        });
+                    }
+                }, 900);
+                return result;
+            };
+
+            const originalCloudPanelStartRealtime = startCloudRealtimeSync;
+            startCloudRealtimeSync = async function(id, options = {}) {
+                const result = await originalCloudPanelStartRealtime.apply(this, arguments);
+                if (!cloudApplyingRemote && !cloudPanelIsVisitorSafe()) {
+                    cloudPanelSaveState(currentExamId, { cloudShareId: cloudPanelSafeExamId(cloudShareId || id || currentExamId || '') });
+                }
+                return result;
+            };
+
+            const originalCloudPanelStopRealtime = stopCloudRealtimeSync;
+            stopCloudRealtimeSync = function(clearUrl = false) {
+                const beforeExamId = currentExamId;
+                const beforeRoomId = cloudShareId;
+                const result = originalCloudPanelStopRealtime.apply(this, arguments);
+                const saveAfterStop = () => {
+                    if (!cloudPanelIsVisitorSafe()) {
+                        cloudPanelSaveState(beforeExamId || currentExamId, {
+                            cloudShareId: cloudPanelSafeExamId(cloudShareId || ''),
+                            previousCloudShareId: cloudPanelSafeExamId(beforeRoomId || ''),
+                            featureEnabled: Boolean(isCloudShareFeatureEnabled)
+                        });
+                    }
+                };
+                if (result && typeof result.then === 'function') result.finally(saveAfterStop);
+                else setTimeout(saveAfterStop, 80);
+                return result;
+            };
+
+            const originalCloudPanelSetFeature = setCloudShareFeatureEnabled;
+            setCloudShareFeatureEnabled = async function(enabled) {
+                const result = await originalCloudPanelSetFeature.apply(this, arguments);
+                if (!cloudPanelIsVisitorSafe()) {
+                    const state = cloudPanelSaveState(currentExamId, { featureEnabled: Boolean(enabled) });
+                    const roomId = cloudPanelSafeExamId((state && state.cloudShareId) || cloudShareId || '');
+                    if (enabled && roomId && !cloudRef && cloudPanelCanUseFirebaseNow()) {
+                        setTimeout(() => cloudPanelRestoreStateForExam(currentExamId, 'toggle-on'), 120);
+                    }
+                }
+                return result;
+            };
+
+            const originalCloudPanelApplySecurity = cloudApplySecurityFromRemote;
+            cloudApplySecurityFromRemote = function(val, roomId) {
+                const result = originalCloudPanelApplySecurity.apply(this, arguments);
+                if (!cloudPanelIsVisitorSafe()) {
+                    setTimeout(() => cloudPanelSaveState(currentExamId, { cloudShareId: cloudPanelSafeExamId(roomId || cloudShareId || '') }), 0);
+                }
+                return result;
+            };
+
+            function cloudPanelInstallMemoryBadge() {
+                const panel = document.getElementById('cloud-sync-panel');
+                if (!panel || panel.querySelector('.cloud-panel-memory-badge')) return;
+                const h3 = panel.querySelector('h3');
+                if (!h3) return;
+                const badge = document.createElement('span');
+                badge.className = 'cloud-panel-memory-badge';
+                badge.textContent = '💾 nhớ theo từng đề';
+                badge.style.cssText = 'font-size:11px;font-weight:900;color:#0369a1;background:#e0f2fe;border:1px solid #bae6fd;border-radius:999px;padding:4px 8px;margin-left:8px;white-space:nowrap;';
+                h3.appendChild(badge);
+            }
+
+            const originalCloudPanelUpdateUI = updateCloudSyncUI;
+            updateCloudSyncUI = function() {
+                const result = originalCloudPanelUpdateUI.apply(this, arguments);
+                cloudPanelInstallMemoryBadge();
+                return result;
+            };
+
+            window.cloudPanelSaveState = cloudPanelSaveState;
+            window.cloudPanelRestoreStateForExam = cloudPanelRestoreStateForExam;
+            setTimeout(() => {
+                cloudPanelInstallMemoryBadge();
+                if (!cloudPanelIsVisitorSafe() && currentExamId) cloudPanelRestoreStateForExam(currentExamId, 'boot');
+            }, 500);
+        })();
+
 
         // ==========================================
     </script>
