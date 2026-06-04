@@ -1557,11 +1557,80 @@
             border-bottom: none;
             background: transparent;
         }
+        /* FIX 2026-06-05: Khi tắt phun hiragana trên website, ẩn phần rt để gạch chân/in đậm không bị tách giữa Kanji và hiragana.
+           Dữ liệu ruby vẫn còn trong HTML nên xuất/in HS-GV không bị đổi. */
+        body:not(.furigana-mode-on) ruby.furigana-ruby rt {
+            display: none !important;
+        }
         body:not(.furigana-mode-on) ruby.furigana-ruby:hover { background: transparent; }
+        /* FIX 2026-06-05: Giữ underline/bold liền khối khi ruby nằm trong <b>/<u>. */
+        b ruby.furigana-ruby,
+        strong ruby.furigana-ruby,
+        u ruby.furigana-ruby,
+        ruby.furigana-ruby b,
+        ruby.furigana-ruby strong,
+        ruby.furigana-ruby u {
+            font-weight: inherit;
+            text-decoration: inherit;
+            text-decoration-skip-ink: none;
+        }
+        u ruby.furigana-ruby,
+        ruby.furigana-ruby u {
+            text-decoration-line: underline;
+        }
         .question-explain ruby.furigana-ruby,
         .bulk-exp-input ruby.furigana-ruby {
             border-bottom: none;
             background: transparent;
+        }
+
+        /* FIX 2026-06-05-B: Ruby/furigana không được làm vỡ format in đậm + gạch chân.
+           Khi tắt phun hiragana: ruby hiển thị như chữ thường để underline nối liền Kanji + kana.
+           Khi bật phun hiragana: bỏ gạch chấm của ruby trong vùng <u> để không tạo cảm giác bị tách. */
+        b, strong { font-weight: 800; }
+        b ruby.furigana-ruby,
+        strong ruby.furigana-ruby,
+        b ruby.furigana-ruby *,
+        strong ruby.furigana-ruby * {
+            font-weight: inherit !important;
+        }
+        u ruby.furigana-ruby,
+        u ruby.furigana-ruby *:not(rt),
+        ruby.furigana-ruby u,
+        ruby.furigana-ruby u *:not(rt) {
+            text-decoration-line: underline !important;
+            text-decoration-skip-ink: none !important;
+            text-underline-offset: 0.12em;
+        }
+        u ruby.furigana-ruby rt,
+        ruby.furigana-ruby u rt {
+            text-decoration: none !important;
+        }
+        u ruby.furigana-ruby,
+        ruby.furigana-ruby u {
+            border-bottom: none !important;
+            background: transparent;
+        }
+        body:not(.furigana-mode-on) ruby.furigana-ruby {
+            display: inline !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            line-height: inherit !important;
+            vertical-align: baseline !important;
+            border-bottom: none !important;
+            background: transparent !important;
+            text-decoration: inherit !important;
+            text-decoration-skip-ink: none !important;
+            text-underline-offset: inherit;
+        }
+        body:not(.furigana-mode-on) ruby.furigana-ruby rt,
+        body:not(.furigana-mode-on) ruby.furigana-ruby rp {
+            display: none !important;
+        }
+        body.furigana-mode-on u ruby.furigana-ruby,
+        body.furigana-mode-on b u ruby.furigana-ruby,
+        body.furigana-mode-on u b ruby.furigana-ruby {
+            border-bottom: none !important;
         }
         #furigana-popover {
             position: fixed;
@@ -2130,7 +2199,7 @@
                 <div class="furigana-panel-head">
                     <div>
                         <div class="furigana-panel-title"> Phun ひらがな</div>
-                        <div class="furigana-panel-desc">Tự động quét Kanji & <br> Bấm vào chữ Hán để nhập cách đọc</div>
+                        <div class="furigana-panel-desc">Quét theo từng Mondai để web nhẹ hơn.<br>Bấm Kanji để nhập cách đọc</div>
                     </div>
                     <label class="switch" title="Bật/tắt phun hiragana">
                         <input type="checkbox" id="toggle-furigana-mode" onchange="toggleFuriganaMode(this.checked)">
@@ -2138,7 +2207,7 @@
                     </label>
                 </div>
                 <div class="furigana-panel-actions">
-                    <button type="button" class="btn-furigana-scan" onclick="applyFuriganaToAllData(true)">🔁 Quét Kanji toàn đề</button>
+                    <button type="button" class="btn-furigana-scan" onclick="applyFuriganaToActiveSection(true)">🔁 Quét Mondai đang mở</button>
                 </div>
             </div>
             <div style="font-size: 11px; color: #64748b; margin-top: 15px; padding-top: 12px; border-top: 1px dashed var(--border-color); line-height: 1.5;">
@@ -5541,6 +5610,7 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
             const walker = document.createTreeWalker(holder, NodeFilter.SHOW_TEXT, {
                 acceptNode(node) {
                     const parent = node.parentElement;
+                    FURIGANA_KANJI_RE.lastIndex = 0;
                     if (!parent || !node.nodeValue || !FURIGANA_KANJI_RE.test(node.nodeValue)) return NodeFilter.FILTER_REJECT;
                     FURIGANA_KANJI_RE.lastIndex = 0;
                     if (parent.closest('ruby, rt, rb, rp, script, style, textarea, select, option, .ai-generated-block, [data-ai-block], .passage-question-blank, .section-title-question-blank, .rte-table-drag-handle, .rte-resize-handle')) return NodeFilter.FILTER_REJECT;
@@ -5575,32 +5645,106 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
                 if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
                 node.replaceWith(frag);
             });
+            normalizeAdjacentInlineFormatWrappers(holder);
             return holder.innerHTML;
         }
 
-        function applyFuriganaToAllData(showToastMessage = false) {
-            examSections.forEach(sec => {
-                sec.title = wrapKanjiHtmlWithFurigana(sec.title || '');
-                (sec.groups || []).forEach(group => {
-                    group.passageHTML = wrapKanjiHtmlWithFurigana(group.passageHTML || '');
-                    (group.questions || []).forEach(q => {
-                        q.text = wrapKanjiHtmlWithFurigana(q.text || '');
-                        q.options = (q.options || ['', '', '', '']).map(opt => wrapKanjiHtmlWithFurigana(opt || ''));
-                        ensureQuestionExplanationFields(q);
-                        // Lời giải xuất/hiển thị theo dạng Kanji (hiragana), không dùng ruby trên đầu.
-                        // Mượn reading từ câu hỏi/đáp án nếu người dùng nhập thủ công, nhưng bỏ qua khối AI.
-                        q.explanation = normalizeExplanationManualReadingHtml(q.explanation || '');
+        function applyFuriganaToQuestionData(q) {
+            if (!q) return;
+            q.text = wrapKanjiHtmlWithFurigana(q.text || '');
+            q.options = (q.options || ['', '', '', '']).map(opt => wrapKanjiHtmlWithFurigana(opt || ''));
+            ensureQuestionExplanationFields(q);
+            // Lời giải xuất/hiển thị theo dạng Kanji (hiragana), không dùng ruby trên đầu.
+            q.explanation = normalizeExplanationManualReadingHtml(q.explanation || '');
+        }
+
+        function applyFuriganaToSectionData(sectionIndex) {
+            const sec = examSections?.[sectionIndex];
+            if (!sec) return false;
+            sec.title = wrapKanjiHtmlWithFurigana(sec.title || '');
+            (sec.groups || []).forEach(group => {
+                group.passageHTML = wrapKanjiHtmlWithFurigana(group.passageHTML || '');
+                (group.questions || []).forEach((q) => {
+                    applyFuriganaToQuestionData(q);
+                    if ((q.underline || '').trim()) {
+                        q.text = rebuildUnderlineFormatHtml(q.text || '', q.underline || '', q.underline || '');
+                    }
+                });
+            });
+            return true;
+        }
+
+        function refreshVisibleFuriganaSection(sectionIndex) {
+            const sec = examSections?.[sectionIndex];
+            if (!sec) return false;
+            const sectionWrapper = document.getElementById(`section-wrapper-${sectionIndex}`);
+            if (!sectionWrapper) return false;
+
+            const titleEl = sectionWrapper.querySelector(`.section-title-editable[data-s-idx="${sectionIndex}"]`);
+            if (titleEl) titleEl.innerHTML = getFuriganaDisplayHtml(refreshSectionTitleBlankLabels(sec.title || '', sec));
+
+            (sec.groups || []).forEach((group, gIdx) => {
+                const passageEl = sectionWrapper.querySelector(`.dokkai-content[data-g-idx="${gIdx}"]`);
+                if (passageEl) {
+                    passageEl.innerHTML = getFuriganaDisplayHtml(refreshPassageBlankLabels(isOnlyDokkaiPlaceholderHtml(group.passageHTML) ? '' : (group.passageHTML || ''), group));
+                    lockRTEObjectsInsideEditor(passageEl);
+                }
+
+                (group.questions || []).forEach((q, qIdx) => {
+                    const title = sectionWrapper.querySelector(`.question-title[data-g-idx="${gIdx}"][data-q-idx="${qIdx}"]`);
+                    if (title) title.innerHTML = getFuriganaDisplayHtml(refreshPassageBlankLabels(renderQuestionFixedTokensForEditor(q.text || '', sec), group));
+                    (q.options || ['', '', '', '']).forEach((opt, oIdx) => {
+                        const optEl = sectionWrapper.querySelector(`.input-opt[data-g-idx="${gIdx}"][data-q-idx="${qIdx}"][data-o-idx="${oIdx}"]`);
+                        if (optEl) optEl.innerHTML = getFuriganaDisplayHtml(opt || '');
                     });
                 });
             });
-            if (!isFuriganaMode) {
-                isFuriganaMode = true;
-                localStorage.setItem('pref_furigana_mode', 'true');
-                document.body.classList.add('furigana-mode-on');
-            }
-            initApp();
+            return true;
+        }
+
+        function ensureFuriganaModeOnForScan() {
+            if (isFuriganaMode) return;
+            isFuriganaMode = true;
+            localStorage.setItem('pref_furigana_mode', 'true');
+            document.body.classList.add('furigana-mode-on');
+            const toggle = document.getElementById('toggle-furigana-mode');
+            if (toggle) toggle.checked = true;
+        }
+
+        function applyFuriganaToSection(sectionIndex = activeSectionIndex, showToastMessage = false) {
+            sectionIndex = parseInt(sectionIndex, 10);
+            if (!Number.isInteger(sectionIndex) || !examSections?.[sectionIndex]) return;
+            ensureFuriganaModeOnForScan();
+            applyFuriganaToSectionData(sectionIndex);
+            const refreshed = refreshVisibleFuriganaSection(sectionIndex);
+            if (!refreshed && sectionIndex === activeSectionIndex) renderActiveSection();
+            renderTabs();
             forceAutoSave();
-            if (showToastMessage) showRTEToast('Đã quét Kanji. Bấm vào chữ Hán để nhập hiragana.');
+            if (showToastMessage) showRTEToast('Đã quét Kanji cho Mondai này. Bấm vào chữ Hán để nhập hiragana.');
+        }
+
+        function applyFuriganaToActiveSection(showToastMessage = false) {
+            applyFuriganaToSection(activeSectionIndex, showToastMessage);
+        }
+
+        function applyFuriganaToAllData(showToastMessage = false) {
+            // Giữ hàm cũ để tương thích, nhưng chạy từng Mondai theo từng frame để tránh giật lag khi đề lớn.
+            ensureFuriganaModeOnForScan();
+            let index = 0;
+            const runNext = () => {
+                if (index >= (examSections || []).length) {
+                    refreshVisibleFuriganaSection(activeSectionIndex);
+                    renderTabs();
+                    forceAutoSave();
+                    if (showToastMessage) showRTEToast('Đã quét Kanji toàn đề theo từng Mondai, giảm giật lag.');
+                    return;
+                }
+                applyFuriganaToSectionData(index);
+                refreshVisibleFuriganaSection(index);
+                index++;
+                requestAnimationFrame(runNext);
+            };
+            requestAnimationFrame(runNext);
         }
 
         function toggleFuriganaMode(enabled) {
@@ -5608,8 +5752,8 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
             localStorage.setItem('pref_furigana_mode', isFuriganaMode ? 'true' : 'false');
             document.body.classList.toggle('furigana-mode-on', isFuriganaMode);
             closeFuriganaPopover();
-            if (isFuriganaMode) applyFuriganaToAllData(false);
-            else initApp();
+            // Bật chế độ chỉ quét Mondai đang mở, không quét toàn đề nữa.
+            if (isFuriganaMode) applyFuriganaToActiveSection(false);
         }
 
         function updateFuriganaToggleUI() {
@@ -6636,6 +6780,9 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
                 htmlContent += `
                     <div class="tab-toolbar inline-section-toolbar ${displayClass}" id="inline-toolbar-${actualSectionIndex}" style="margin-bottom: 15px;">
                         <div contenteditable="true" class="section-input section-title-editable" data-s-idx="${actualSectionIndex}" placeholder="Nhập tiêu đề Mondai hiện tại..." oninput="handleInlineTitleInput(this, ${actualSectionIndex})" onkeydown="handleSectionTitleKeydown(event, this, ${actualSectionIndex})" onclick="handleSectionTitleClick(event, ${actualSectionIndex})">${safeTitleHtml}</div>
+                        <div class="furigana-section-actions" style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+                            <button type="button" class="btn-furigana-scan" style="max-width:220px; flex:0 0 auto;" onclick="applyFuriganaToSection(${actualSectionIndex}, true)">🔁 Phun ひらがな Mondai này</button>
+                        </div>
                     </div>
                 `;
                 sectionWrapper.innerHTML += htmlContent;
@@ -7732,83 +7879,145 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
             return false;
         }
 
+        function unwrapInlineFormatOnly(el) {
+            if (!el || !el.parentNode) return;
+            const parent = el.parentNode;
+            const frag = document.createDocumentFragment();
+            while (el.firstChild) frag.appendChild(el.firstChild);
+            parent.replaceChild(frag, el);
+        }
+
+        function elementDepthForFormat(el) {
+            let depth = 0;
+            while (el && el.parentElement) {
+                depth++;
+                el = el.parentElement;
+            }
+            return depth;
+        }
+
+        function getUnderlinePhraseVariantsForCleanup(...phrases) {
+            const out = [];
+            const push = (v) => {
+                v = stripInlineReadingForUnderline(v || '');
+                if (v && !out.includes(v)) out.push(v);
+            };
+            phrases.forEach(phrase => getUnderlineSearchVariants(phrase || '').forEach(push));
+            return out;
+        }
+
+        function unwrapBrokenUnderlineFragments(holder, underlineWord = '', previousUnderline = '') {
+            if (!holder) return;
+            const variants = getUnderlinePhraseVariantsForCleanup(underlineWord, previousUnderline);
+            const hasPhrase = variants.length > 0;
+            const nodes = Array.from(holder.querySelectorAll('b, strong, u'))
+                .sort((a, b) => elementDepthForFormat(b) - elementDepthForFormat(a));
+
+            nodes.forEach(el => {
+                if (!el || !el.isConnected) return;
+                const text = stripInlineReadingForUnderline(el.textContent || '');
+                const isAutoMarked = el.hasAttribute('data-auto-underline');
+                const isPairFragment = !!el.closest('b[data-auto-underline], strong[data-auto-underline], u[data-auto-underline]');
+                const matchesTargetPhrase = hasPhrase && text && variants.some(v => {
+                    return v === text || v.includes(text) || text.includes(v);
+                });
+                if (isAutoMarked || isPairFragment || matchesTargetPhrase) {
+                    unwrapInlineFormatOnly(el);
+                }
+            });
+        }
+
+        function applyUnderlineFallbackTextNodes(holder, underlineWord) {
+            const variants = getUnderlineSearchVariants(underlineWord);
+            variants.forEach(variant => {
+                const escapedUnderline = variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const re = new RegExp(escapedUnderline, 'g');
+                const walker = document.createTreeWalker(holder, NodeFilter.SHOW_TEXT, {
+                    acceptNode(node) {
+                        const parent = node.parentElement;
+                        if (!parent || !node.nodeValue) return NodeFilter.FILTER_REJECT;
+                        if (parent.closest('b, strong, u, ruby, rt, rp, script, style, textarea, select, option, .passage-question-blank')) return NodeFilter.FILTER_REJECT;
+                        re.lastIndex = 0;
+                        return re.test(normalizeUnderlineSearchText(node.nodeValue)) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+                    }
+                });
+                const nodes = [];
+                while (walker.nextNode()) nodes.push(walker.currentNode);
+                nodes.forEach(node => {
+                    const sourceText = node.nodeValue || '';
+                    const compactText = normalizeUnderlineSearchText(sourceText);
+                    if (compactText !== sourceText || !re.test(sourceText)) return;
+                    const frag = document.createDocumentFragment();
+                    let last = 0;
+                    re.lastIndex = 0;
+                    let match;
+                    while ((match = re.exec(sourceText)) !== null) {
+                        if (match.index > last) frag.appendChild(document.createTextNode(sourceText.slice(last, match.index)));
+                        const b = document.createElement('b');
+                        const u = document.createElement('u');
+                        b.setAttribute('data-auto-underline', 'true');
+                        u.setAttribute('data-auto-underline', 'true');
+                        u.textContent = match[0];
+                        b.appendChild(u);
+                        frag.appendChild(b);
+                        last = match.index + match[0].length;
+                    }
+                    if (last < sourceText.length) frag.appendChild(document.createTextNode(sourceText.slice(last)));
+                    node.replaceWith(frag);
+                });
+            });
+        }
+
+        function rebuildUnderlineFormatHtml(html, underlineWord = '', previousUnderline = '') {
+            underlineWord = (underlineWord || '').trim();
+            previousUnderline = (previousUnderline || '').trim();
+            const holder = document.createElement('div');
+            holder.innerHTML = cleanEditableHtml(html || '');
+
+            // Gỡ các mảnh <b>/<u> cũ bị tách bởi ruby, ví dụ: <u><ruby>通</ruby>り</u><b><u>過ぎた</u></b>.
+            // Sau đó bọc lại một lần trọn cụm để Kanji + hiragana/kana liền format.
+            unwrapBrokenUnderlineFragments(holder, underlineWord, previousUnderline);
+
+            if (!underlineWord) return normalizeQuestionTokens(holder.innerHTML);
+
+            const appliedByPhrase = applyUnderlineByPhraseRange(holder, underlineWord);
+            if (!appliedByPhrase) applyUnderlineFallbackTextNodes(holder, underlineWord);
+
+            normalizeAdjacentInlineFormatWrappers(holder);
+            return normalizeQuestionTokens(holder.innerHTML);
+        }
+
+        function normalizeAdjacentInlineFormatWrappers(root) {
+            if (!root) return;
+            // Xóa bọc lồng trùng kiểu <b><b>...</b></b>, <u><u>...</u></u> do Ctrl+B/U lặp.
+            Array.from(root.querySelectorAll('b b, strong strong, u u')).reverse().forEach(el => unwrapInlineFormatOnly(el));
+
+            const mergeOnce = (tagNames) => {
+                let changed = false;
+                const all = Array.from(root.querySelectorAll(tagNames.join(',')));
+                all.forEach(el => {
+                    if (!el || !el.isConnected) return;
+                    let next = el.nextSibling;
+                    while (next && next.nodeType === Node.TEXT_NODE && !next.nodeValue) next = next.nextSibling;
+                    if (next && next.nodeType === Node.ELEMENT_NODE && tagNames.includes(next.tagName.toLowerCase())) {
+                        while (next.firstChild) el.appendChild(next.firstChild);
+                        next.remove();
+                        changed = true;
+                    }
+                });
+                return changed;
+            };
+            for (let i = 0; i < 4; i++) {
+                const c1 = mergeOnce(['b', 'strong']);
+                const c2 = mergeOnce(['u']);
+                if (!c1 && !c2) break;
+            }
+        }
+
         function reapplyUnderlineFormat(gIdx, qIdx, previousUnderline = '') {
             if(activeSectionIndex === -1) return;
             const q = examSections[activeSectionIndex].groups[gIdx].questions[qIdx];
-            let html = q.text || '';
-            let underlineWord = (q.underline || '').trim();
-            const oldUnderlineWord = (previousUnderline || '').trim();
-
-            const holder = document.createElement('div');
-            holder.innerHTML = cleanEditableHtml(html);
-
-            // Ô "Từ tự in đậm & gạch dưới" là nguồn điều khiển chính:
-            // mỗi lần ô này đổi/rỗng, gỡ lớp auto cũ trước rồi mới áp dụng trạng thái mới.
-            holder.querySelectorAll('b > u, strong > u, u > b, u > strong').forEach(el => {
-                const text = (el.textContent || '').trim();
-                const parent = el.parentElement;
-                const isAutoMarked = el.hasAttribute('data-auto-underline') || parent?.hasAttribute('data-auto-underline');
-                const matchesOldValue = !!oldUnderlineWord && text === oldUnderlineWord;
-                const matchesCurrentValue = !!underlineWord && text === underlineWord;
-                const shouldRemove = isAutoMarked || matchesOldValue || (!underlineWord && matchesCurrentValue);
-                if (shouldRemove) unwrapUnderlineElementKeepContent(el);
-            });
-
-            // Nếu ô đã bị xóa, cập nhật lại khung câu hỏi ngay: bỏ in đậm/gạch chân cũ rồi dừng.
-            if (!underlineWord) {
-                q.text = normalizeQuestionTokens(holder.innerHTML);
-                const inputEl = document.getElementById(`qtitle-g${gIdx}-q${qIdx}`);
-                if(inputEl && inputEl.innerHTML !== q.text) setEditableHtmlPreserveCaret(inputEl, q.text);
-                return;
-            }
-
-            // Ưu tiên bọc theo cụm đầy đủ: Kanji + hiragana đi sau, Katakana, hoặc dạng Kanji(kana).
-            // Ví dụ: 治(なお)したくて / 私(わたし)の国(くに) / エアコン đều được nhận như một cụm.
-            const appliedByPhrase = applyUnderlineByPhraseRange(holder, underlineWord);
-
-            // Dự phòng cho trường hợp rất cũ: nếu chưa bọc được theo cụm, bọc từng text node bằng exact match.
-            if (!appliedByPhrase) {
-                const variants = getUnderlineSearchVariants(underlineWord);
-                variants.forEach(variant => {
-                    const escapedUnderline = variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                    const re = new RegExp(escapedUnderline, 'g');
-                    const walker = document.createTreeWalker(holder, NodeFilter.SHOW_TEXT, {
-                        acceptNode(node) {
-                            const parent = node.parentElement;
-                            if (!parent || !node.nodeValue) return NodeFilter.FILTER_REJECT;
-                            if (parent.closest('b, strong, u, ruby, rt, rp, script, style, textarea, select, option, .passage-question-blank')) return NodeFilter.FILTER_REJECT;
-                            re.lastIndex = 0;
-                            return re.test(normalizeUnderlineSearchText(node.nodeValue)) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
-                        }
-                    });
-                    const nodes = [];
-                    while (walker.nextNode()) nodes.push(walker.currentNode);
-                    nodes.forEach(node => {
-                        const sourceText = node.nodeValue || '';
-                        const compactText = normalizeUnderlineSearchText(sourceText);
-                        if (compactText !== sourceText || !re.test(sourceText)) return;
-                        const frag = document.createDocumentFragment();
-                        let last = 0;
-                        re.lastIndex = 0;
-                        let match;
-                        while ((match = re.exec(sourceText)) !== null) {
-                            if (match.index > last) frag.appendChild(document.createTextNode(sourceText.slice(last, match.index)));
-                            const b = document.createElement('b');
-                            const u = document.createElement('u');
-                            b.setAttribute('data-auto-underline', 'true');
-                            u.setAttribute('data-auto-underline', 'true');
-                            u.textContent = match[0];
-                            b.appendChild(u);
-                            frag.appendChild(b);
-                            last = match.index + match[0].length;
-                        }
-                        if (last < sourceText.length) frag.appendChild(document.createTextNode(sourceText.slice(last)));
-                        node.replaceWith(frag);
-                    });
-                });
-            }
-
-            q.text = normalizeQuestionTokens(holder.innerHTML);
+            q.text = rebuildUnderlineFormatHtml(q.text || '', q.underline || '', previousUnderline || '');
             const inputEl = document.getElementById(`qtitle-g${gIdx}-q${qIdx}`);
             if(inputEl && inputEl.innerHTML !== q.text) {
                 setEditableHtmlPreserveCaret(inputEl, q.text);
@@ -9307,8 +9516,10 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
         function syncInputData(input) {
             if(activeSectionIndex === -1) return;
             const gIdx = parseInt(input.getAttribute('data-g-idx')); const qIdx = parseInt(input.getAttribute('data-q-idx'));
+            const sIdxAttr = parseInt(input.closest?.('.question-block')?.getAttribute('data-s-idx') || input.closest?.('.section-wrapper')?.id?.replace('section-wrapper-', '') || activeSectionIndex, 10);
+            const targetSectionIndex = Number.isInteger(sIdxAttr) && examSections?.[sIdxAttr] ? sIdxAttr : activeSectionIndex;
             if(isNaN(gIdx) || isNaN(qIdx)) return;
-            const q = examSections[activeSectionIndex].groups[gIdx].questions[qIdx];
+            const q = examSections[targetSectionIndex].groups[gIdx].questions[qIdx];
             
             const val = input.isContentEditable ? cleanEditableHtml(input.innerHTML, input.getAttribute('placeholder') || '') : input.value; 
 
@@ -9438,9 +9649,99 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
             autoSave(); 
         }
 
+        function rangeIntersectsRuby(range, editable) {
+            if (!range || !editable) return false;
+            return Array.from(editable.querySelectorAll('ruby.furigana-ruby')).some(ruby => {
+                try { return range.intersectsNode(ruby); }
+                catch (err) { return false; }
+            });
+        }
+
+        function wrapSelectionWithInlineTag(editable, tagName) {
+            const selection = window.getSelection();
+            if (!editable || !selection || selection.rangeCount === 0) return false;
+            const range = selection.getRangeAt(0);
+            if (range.collapsed || !editable.contains(range.commonAncestorContainer)) return false;
+
+            const wrapper = document.createElement(tagName);
+            wrapper.setAttribute('data-manual-format', 'true');
+            try {
+                const frag = range.extractContents();
+                wrapper.appendChild(frag);
+                range.insertNode(wrapper);
+                normalizeAdjacentInlineFormatWrappers(editable);
+
+                const nextRange = document.createRange();
+                nextRange.selectNodeContents(wrapper.isConnected ? wrapper : editable);
+                selection.removeAllRanges();
+                selection.addRange(nextRange);
+                return true;
+            } catch (err) {
+                console.warn('Không thể bọc format thủ công:', err);
+                return false;
+            }
+        }
+
+        function applyHotkeyInlineFormat(editable, command) {
+            const selection = window.getSelection();
+            if (!editable || !selection || selection.rangeCount === 0) {
+                document.execCommand(command, false, null);
+                return;
+            }
+            const range = selection.getRangeAt(0);
+            const tag = command === 'bold' ? 'b' : 'u';
+            expandSelectionToWholeRubyInsideEditable(editable);
+
+            // Nếu selection chạm ruby/contenteditable=false, execCommand thường bỏ sót Kanji.
+            // Bọc thủ công để cả ruby + phần kana phía sau cùng nhận <b>/<u> một khối.
+            const expandedRange = selection.rangeCount ? selection.getRangeAt(0) : range;
+            if (!expandedRange.collapsed && rangeIntersectsRuby(expandedRange, editable)) {
+                if (wrapSelectionWithInlineTag(editable, tag)) return;
+            }
+            document.execCommand(command, false, null);
+            normalizeAdjacentInlineFormatWrappers(editable);
+        }
+
         function setupKeyboardMagic() {
             document.removeEventListener('keydown', handleGlobalKeydown);
             document.addEventListener('keydown', handleGlobalKeydown);
+        }
+
+        function getEditableHotkeyTarget(target) {
+            return target?.closest?.('.input-opt, .question-title, .question-explain, .question-note, .bulk-exp-input, .bulk-note-input, .dokkai-content') || null;
+        }
+
+        function expandSelectionToWholeRubyInsideEditable(editable) {
+            const selection = window.getSelection();
+            if (!editable || !selection || selection.rangeCount === 0 || selection.isCollapsed) return;
+            const range = selection.getRangeAt(0);
+            if (!editable.contains(range.commonAncestorContainer)) return;
+            const startRuby = range.startContainer?.parentElement?.closest?.('ruby.furigana-ruby');
+            const endRuby = range.endContainer?.parentElement?.closest?.('ruby.furigana-ruby');
+            try {
+                if (startRuby && editable.contains(startRuby)) range.setStartBefore(startRuby);
+                if (endRuby && editable.contains(endRuby)) range.setEndAfter(endRuby);
+                selection.removeAllRanges();
+                selection.addRange(range);
+            } catch (err) {}
+        }
+
+        function syncEditableAfterFormat(editable) {
+            if (!editable) return;
+            if (editable.classList.contains('bulk-exp-input')) handleBulkExplanationInput(editable);
+            else if (editable.classList.contains('bulk-note-input')) handleBulkNoteInput(editable);
+            else if (editable.classList.contains('dokkai-content')) syncPassage(parseInt(editable.getAttribute('data-g-idx')));
+            else {
+                syncInputData(editable);
+                if (editable.classList.contains('question-title')) {
+                    const gIdx = parseInt(editable.getAttribute('data-g-idx'));
+                    const qIdx = parseInt(editable.getAttribute('data-q-idx'));
+                    const q = examSections?.[activeSectionIndex]?.groups?.[gIdx]?.questions?.[qIdx];
+                    if (q && (q.underline || '').trim()) reapplyUnderlineFormat(gIdx, qIdx, q.underline || '');
+                    reapplyStarPosition(gIdx, qIdx);
+                }
+                autoSave();
+            }
         }
 
         function handleGlobalKeydown(e) {
@@ -9458,26 +9759,18 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
                 }
             }
 
-            if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'b' || e.key.toLowerCase() === 'u')) {
-                if (target.classList.contains('input-opt') || target.classList.contains('question-title') || target.classList.contains('question-explain') || target.classList.contains('question-note') || target.classList.contains('bulk-exp-input') || target.classList.contains('bulk-note-input') || target.classList.contains('dokkai-content')) {
-                    e.preventDefault(); // Chặn hành động mặc định của trình duyệt
-                    
-                    // Sử dụng execCommand chuẩn cho contenteditable
-                    const command = e.key.toLowerCase() === 'b' ? 'bold' : 'underline';
-                    document.execCommand(command, false, null);
-                    
-                    // Đồng bộ dữ liệu
-                    if (!target.classList.contains('bulk-exp-input') && !target.classList.contains('bulk-note-input')) {
-                        syncInputData(target);
-                        if (target.classList.contains('question-title')) {
-                            const gIdx = parseInt(target.getAttribute('data-g-idx')); 
-                            const qIdx = parseInt(target.getAttribute('data-q-idx'));
-                            reapplyStarPosition(gIdx, qIdx); 
-                            // Lưu ý: Không gọi reapplyUnderlineFormat ở đây để tránh làm mất định dạng bôi đen thủ công
-                        }
-                    }
-                    autoSave();
-                    return; // Dừng xử lý các phím khác
+            const hotkeyKey = (e.key || '').toLowerCase();
+            if ((e.ctrlKey || e.metaKey) && (hotkeyKey === 'b' || hotkeyKey === 'u')) {
+                const editable = getEditableHotkeyTarget(target);
+                if (editable) {
+                    e.preventDefault();
+                    editable.focus();
+                    expandSelectionToWholeRubyInsideEditable(editable);
+                    const command = hotkeyKey === 'b' ? 'bold' : 'underline';
+                    applyHotkeyInlineFormat(editable, command);
+                    // Đồng bộ sau 1 frame để Ctrl+B/Ctrl+U nhạy hơn, đặc biệt khi selection chạm ruby/furigana.
+                    requestAnimationFrame(() => syncEditableAfterFormat(editable));
+                    return;
                 }
             }
 
@@ -11968,7 +12261,8 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
 
             let filename = document.getElementById('filename-field').value.trim() || 'De_Thi';
             let titleSuffix = isAnswerKey ? " (BẢN ĐÁP ÁN GIÁO VIÊN)" : " (BẢN ĐỀ THI HỌC SINH)";
-            html += "<h2 class='export-main-title'>" + filename.toUpperCase() + titleSuffix + "</h2>";
+            const wordExportSplitLabel = exportOptions && exportOptions.wordExportSplitLabel ? " - " + exportOptions.wordExportSplitLabel : "";
+            html += "<h2 class='export-main-title'>" + filename.toUpperCase() + titleSuffix + wordExportSplitLabel + "</h2>";
 
             const exportPartLabels = {
                 moji: "文字・語彙",
@@ -11980,8 +12274,20 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
             let lastExportPart = null;
             let exportPartCounter = 0;
             let teacherMondaiPartCounter = 0;
+            const wordExportRange = getWordExportRangeFromOptions(exportOptions);
+            const wordExportSectionOrdinalMap = getWordExportSectionOrdinalMapFromOptions(exportOptions);
+            let wordExportGlobalQuestionIndex = 0;
 
             examSections.forEach((sec, sIdx) => {
+                const sectionQuestionStartIndex = wordExportGlobalQuestionIndex;
+                const sectionQuestionCount = countQuestionsInSectionForWordExport(sec);
+                const sectionQuestionEndIndex = sectionQuestionStartIndex + sectionQuestionCount;
+                wordExportGlobalQuestionIndex = sectionQuestionEndIndex;
+
+                if (!wordExportRangeIntersects(wordExportRange, sectionQuestionStartIndex, sectionQuestionEndIndex)) {
+                    return;
+                }
+
                 if (!isAnswerKey && addPartTitles && sec.parentType !== lastExportPart) {
                     exportPartCounter++;
                     const partTitle = exportPartLabels[sec.parentType] || "";
@@ -11995,12 +12301,25 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
 
                 if (isAnswerKey && addPartTitles) {
                     teacherMondaiPartCounter++;
-                    safeTitle = "Phần " + getRomanNumeral(teacherMondaiPartCounter) + ". " + safeTitle;
+                    const fixedTeacherPartNumber = wordExportSectionOrdinalMap && typeof wordExportSectionOrdinalMap[sIdx] !== 'undefined'
+                        ? parseInt(wordExportSectionOrdinalMap[sIdx], 10)
+                        : teacherMondaiPartCounter;
+                    safeTitle = "Phần " + getRomanNumeral(fixedTeacherPartNumber || teacherMondaiPartCounter) + ". " + safeTitle;
                 }
 
                 html += "<h3 class='mondai-title'>" + safeTitle + "</h3>";
 
+                let groupQuestionCursor = sectionQuestionStartIndex;
                 sec.groups.forEach((group, gIdx) => {
+                    const groupQuestionStartIndex = groupQuestionCursor;
+                    const groupQuestionCount = (group.questions || []).length;
+                    const groupQuestionEndIndex = groupQuestionStartIndex + groupQuestionCount;
+                    groupQuestionCursor = groupQuestionEndIndex;
+
+                    if (!wordExportRangeIntersects(wordExportRange, groupQuestionStartIndex, groupQuestionEndIndex)) {
+                        return;
+                    }
+
                     if (sec.features.isGrouped && group.passageHTML && group.passageHTML.trim() !== "" && group.passageHTML !== "<p><br></p>") {
                         const passageKey = sIdx + '-' + gIdx;
                         const capturedPassage = forWordDoc && window.__wordPassageImageMap ? window.__wordPassageImageMap[passageKey] : null;
@@ -12011,7 +12330,12 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
                         }
                     }
 
-                    group.questions.forEach(q => {
+                    group.questions.forEach((q, qIdx) => {
+                        const wordExportCurrentQuestionIndex = groupQuestionStartIndex + qIdx;
+                        if (!wordExportQuestionInRange(wordExportRange, wordExportCurrentQuestionIndex)) {
+                            return;
+                        }
+
                         let exportText = stripQuestionStarToken(isAnswerKey ? stripFuriganaHtml(q.text || '') : (q.text || ''));
                         let safeText = prepareInlineHtmlForExport(exportText);
 
@@ -12082,6 +12406,188 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
             html += "</body></html>"; return html;
         }
 
+
+        // ==========================================
+        // WORD EXPORT AUTO-SPLIT FOR HUGE GV/HS FILES
+        // - Chỉ áp dụng cho xuất Word học sinh / giáo viên.
+        // - Không đổi số thứ tự câu hỏi: mỗi câu vẫn in theo q.id đang có trên web.
+        // - Khi đề quá lớn, tự tách theo khoảng câu global để Word mở nhẹ hơn.
+        // ==========================================
+        const WORD_EXPORT_AUTO_SPLIT_MAX_QUESTIONS = 180;
+        const WORD_EXPORT_AUTO_SPLIT_MAX_APPROX_CHARS = 850000;
+        const WORD_EXPORT_AUTO_SPLIT_CLICK_DELAY_MS = 260;
+
+        function getWordExportRangeFromOptions(exportOptions = {}) {
+            const range = exportOptions && exportOptions.wordExportQuestionRange;
+            if (!range || typeof range.start === 'undefined' || typeof range.end === 'undefined') return null;
+            const start = Math.max(0, parseInt(range.start, 10) || 0);
+            const end = Math.max(start, parseInt(range.end, 10) || start);
+            return { start, end };
+        }
+
+        function getWordExportSectionOrdinalMapFromOptions(exportOptions = {}) {
+            return exportOptions && exportOptions.wordExportSectionOrdinalMap ? exportOptions.wordExportSectionOrdinalMap : null;
+        }
+
+        function wordExportRangeIntersects(range, start, end) {
+            if (!range) return true;
+            if (end <= start) return false;
+            return end > range.start && start < range.end;
+        }
+
+        function wordExportQuestionInRange(range, index) {
+            if (!range) return true;
+            return index >= range.start && index < range.end;
+        }
+
+        function countQuestionsInSectionForWordExport(sec) {
+            if (!sec || !Array.isArray(sec.groups)) return 0;
+            return sec.groups.reduce((sum, group) => sum + ((group && Array.isArray(group.questions)) ? group.questions.length : 0), 0);
+        }
+
+        function buildWordExportSectionOrdinalMap() {
+            const map = {};
+            let ordinal = 0;
+            (examSections || []).forEach((sec, sIdx) => {
+                if (countQuestionsInSectionForWordExport(sec) > 0) {
+                    ordinal++;
+                    map[sIdx] = ordinal;
+                }
+            });
+            return map;
+        }
+
+        function wordExportTextWeight(value) {
+            return String(value || '').length;
+        }
+
+        function estimateWordExportQuestionWeight(q, group, isAnswerKey) {
+            if (!q) return 1200;
+            let weight = 1200;
+            weight += wordExportTextWeight(q.text) * 2;
+            weight += wordExportTextWeight((q.options || []).join(' ')) * 2;
+            weight += wordExportTextWeight(q.image);
+            if (isAnswerKey) {
+                weight += wordExportTextWeight(q.explanation) * 2;
+                weight += wordExportTextWeight(q.note) * 2;
+            }
+            // Bài đọc / hội thoại thường nặng hơn câu đơn; cộng nhẹ để tránh dồn quá nhiều vào một tập.
+            if (group && group.passageHTML) weight += Math.ceil(wordExportTextWeight(group.passageHTML) / 3);
+            return weight;
+        }
+
+        function collectWordExportQuestionRefs(isAnswerKey) {
+            const refs = [];
+            let index = 0;
+            (examSections || []).forEach((sec, sIdx) => {
+                (sec.groups || []).forEach((group, gIdx) => {
+                    (group.questions || []).forEach((q, qIdx) => {
+                        refs.push({
+                            index,
+                            sIdx,
+                            gIdx,
+                            qIdx,
+                            q,
+                            approxChars: estimateWordExportQuestionWeight(q, group, isAnswerKey)
+                        });
+                        index++;
+                    });
+                });
+            });
+            return refs;
+        }
+
+        function getWordExportQuestionDisplayId(ref) {
+            if (ref && ref.q && String(ref.q.id || '').trim() !== '') return String(ref.q.id).trim();
+            return String((ref && typeof ref.index === 'number' ? ref.index : 0) + 1);
+        }
+
+        function buildWordExportAutoSplitChunks(isAnswerKey) {
+            const refs = collectWordExportQuestionRefs(isAnswerKey);
+            if (refs.length === 0) return [];
+
+            const chunks = [];
+            let start = 0;
+            let approxChars = 0;
+
+            refs.forEach((ref, localIdx) => {
+                const currentCount = localIdx - start;
+                const wouldBeTooManyQuestions = currentCount >= WORD_EXPORT_AUTO_SPLIT_MAX_QUESTIONS;
+                const wouldBeTooHeavy = currentCount > 0 && (approxChars + ref.approxChars > WORD_EXPORT_AUTO_SPLIT_MAX_APPROX_CHARS);
+
+                if (wouldBeTooManyQuestions || wouldBeTooHeavy) {
+                    chunks.push({ start, end: localIdx });
+                    start = localIdx;
+                    approxChars = 0;
+                }
+
+                approxChars += ref.approxChars;
+            });
+
+            if (start < refs.length) chunks.push({ start, end: refs.length });
+
+            return chunks.map((chunk, idx) => {
+                const firstRef = refs[chunk.start];
+                const lastRef = refs[chunk.end - 1];
+                return {
+                    ...chunk,
+                    partIndex: idx + 1,
+                    totalParts: chunks.length,
+                    firstQuestionId: getWordExportQuestionDisplayId(firstRef),
+                    lastQuestionId: getWordExportQuestionDisplayId(lastRef)
+                };
+            });
+        }
+
+        function cloneExportOptionsWithWordRange(exportOptions, chunk, sectionOrdinalMap) {
+            return {
+                ...(exportOptions || {}),
+                wordExportQuestionRange: { start: chunk.start, end: chunk.end },
+                wordExportSectionOrdinalMap: sectionOrdinalMap || buildWordExportSectionOrdinalMap(),
+                wordExportSplitLabel: `TẬP ${String(chunk.partIndex).padStart(2, '0')}/${String(chunk.totalParts).padStart(2, '0')} · CÂU ${chunk.firstQuestionId}-${chunk.lastQuestionId}`
+            };
+        }
+
+        function triggerWordDocxDownload(blob, downloadName) {
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = downloadName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(link.href), 4000);
+        }
+
+        function sleepWordExport(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        async function downloadWordDocxWithAutoSplit({ filename, isAnswerKey, addPartTitles, includeAnswerExplanationTable = false, exportOptions = {}, fileSuffix }) {
+            const chunks = buildWordExportAutoSplitChunks(isAnswerKey);
+            const sectionOrdinalMap = buildWordExportSectionOrdinalMap();
+
+            if (chunks.length <= 1) {
+                window.__wordPassageImageMap = null;
+                const html = generateHtmlForPrintOrExport(isAnswerKey, addPartTitles, true, includeAnswerExplanationTable, exportOptions);
+                const blob = htmlDocx.asBlob(html);
+                triggerWordDocxDownload(blob, filename + fileSuffix + '.docx');
+                return { partCount: 1, questionCount: chunks.length ? (chunks[0].end - chunks[0].start) : 0 };
+            }
+
+            for (const chunk of chunks) {
+                window.__wordPassageImageMap = null;
+                const chunkOptions = cloneExportOptionsWithWordRange(exportOptions, chunk, sectionOrdinalMap);
+                const html = generateHtmlForPrintOrExport(isAnswerKey, addPartTitles, true, includeAnswerExplanationTable, chunkOptions);
+                const blob = htmlDocx.asBlob(html);
+                const partNo = String(chunk.partIndex).padStart(2, '0');
+                const downloadName = `${filename}${fileSuffix}_Tap_${partNo}_Cau_${chunk.firstQuestionId}-${chunk.lastQuestionId}.docx`;
+                triggerWordDocxDownload(blob, downloadName);
+                await sleepWordExport(WORD_EXPORT_AUTO_SPLIT_CLICK_DELAY_MS);
+            }
+
+            return { partCount: chunks.length, questionCount: chunks[chunks.length - 1].end };
+        }
+
         function isStudentWordExportEnabled() {
             const el = document.getElementById('export-student-word-toggle');
             return !el || el.checked;
@@ -12124,29 +12630,42 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
                         return;
                     }
 
+                    let studentWordSplitResult = null;
                     if (exportWord) {
-                        window.__wordPassageImageMap = null;
-                        const blob = htmlDocx.asBlob(generateHtmlForPrintOrExport(false, true, true, false));
-                        const link = document.createElement('a'); 
-                        link.href = URL.createObjectURL(blob); 
-                        link.download = filename + "_De_Hoc_Sinh.docx";
-                        document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                        studentWordSplitResult = await downloadWordDocxWithAutoSplit({
+                            filename,
+                            isAnswerKey: false,
+                            addPartTitles: true,
+                            includeAnswerExplanationTable: false,
+                            exportOptions,
+                            fileSuffix: "_De_Hoc_Sinh"
+                        });
                     }
 
                     if (exportExcel) {
                         setTimeout(() => downloadAnswerExplanationExcel(filename, exportOptions), exportWord ? 250 : 0);
+                    }
+
+                    if (studentWordSplitResult && studentWordSplitResult.partCount > 1) {
+                        setTimeout(() => alert(`Đề học sinh quá lớn nên hệ thống đã tự tách thành ${studentWordSplitResult.partCount} tập Word. Số thứ tự câu vẫn giữ nguyên như trên web.`), exportExcel ? 700 : 250);
                     }
                 }
                 else if (type === 'teacher') {
                     // File giáo viên dùng cho Azota: thêm Phần I/II/III... trước từng tiêu đề 問題,
                     // không thêm nhãn 文字・語彙 / 文法 / 読解 / 聴解; đáp án đúng tô đỏ trong lựa chọn A/B/C/D,
                     // chỉ ghi lời giải bên dưới câu hỏi.
-                    window.__wordPassageImageMap = null;
-                    const blob = htmlDocx.asBlob(generateHtmlForPrintOrExport(true, true, true, false, exportOptions));
-                    const link = document.createElement('a'); 
-                    link.href = URL.createObjectURL(blob); 
-                    link.download = filename + "_Huong_Dan_Giai.docx";
-                    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                    const teacherWordSplitResult = await downloadWordDocxWithAutoSplit({
+                        filename,
+                        isAnswerKey: true,
+                        addPartTitles: true,
+                        includeAnswerExplanationTable: false,
+                        exportOptions,
+                        fileSuffix: "_Huong_Dan_Giai"
+                    });
+
+                    if (teacherWordSplitResult && teacherWordSplitResult.partCount > 1) {
+                        setTimeout(() => alert(`File giáo viên quá lớn nên hệ thống đã tự tách thành ${teacherWordSplitResult.partCount} tập Word. Số thứ tự câu vẫn giữ nguyên như trên web.`), 250);
+                    }
                 }
             });
         }
