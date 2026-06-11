@@ -17423,6 +17423,1661 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
             }
         };
 
+
+
+        // ==========================================
+        // PATCH 2026-06-12: FIX CTRL+B/CTRL+U + PASTE + DỌN SPACE + XUẤT THEO MONDAI
+        // - Ctrl+B/Ctrl+U tắt là tắt thật, không tự bọc lại <b><u>.
+        // - Ô “Từ tự in đậm & gạch dưới” chỉ đồng bộ theo cụm đang thật sự có cả B + U.
+        // - Từ hiragana bị trùng: nhập tay ưu tiên lần xuất hiện đầu tiên từ trái sang phải; bôi chọn thì giữ đúng vị trí đã chọn.
+        // - Paste vào ô câu hỏi không còn bị document paste handler chèn thêm lần 2.
+        // - Dọn rác xoá space thừa giữa ký tự Nhật, nhưng không xoá token _______ / ___★___ / （　　　） / ô đánh số.
+        // - Word/Excel có thể xuất theo Mondai được tick; đáp án đỏ GV không bị in đậm.
+        // ==========================================
+        (function installJlptFormatPasteExportPatch20260612(){
+            if (window.__jlptFormatPasteExportPatch20260612Installed) return;
+            window.__jlptFormatPasteExportPatch20260612Installed = true;
+
+            const JP_CHAR_RE_20260612 = /[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff々〆ヶ]/;
+            const QUESTION_TOKEN_PLACEHOLDER_PREFIX_20260612 = '%%JLPT_QTOKEN_20260612_';
+
+            function getNormalizeForFormat20260612(value) {
+                if (typeof normalizeTextForFormatSync === 'function') return normalizeTextForFormatSync(value || '');
+                return String(value || '').replace(/[\s　]+/g, '').trim();
+            }
+
+            function countOccurrences20260612(haystack, needle) {
+                haystack = String(haystack || '');
+                needle = String(needle || '');
+                if (!haystack || !needle) return 0;
+                let count = 0;
+                let pos = 0;
+                while ((pos = haystack.indexOf(needle, pos)) !== -1) {
+                    count++;
+                    pos += Math.max(1, needle.length);
+                }
+                return count;
+            }
+
+            function getRangeBefore20260612(editable, node, offset) {
+                const before = document.createRange();
+                before.selectNodeContents(editable);
+                try { before.setEnd(node, offset); } catch (_) { before.collapse(true); }
+                return before;
+            }
+
+            function getFormatSyncText20260612(nodeOrFragment) {
+                if (typeof visibleEditableTextForFormatSync === 'function') return visibleEditableTextForFormatSync(nodeOrFragment);
+                const clone = nodeOrFragment.cloneNode ? nodeOrFragment.cloneNode(true) : document.createTextNode(String(nodeOrFragment || ''));
+                if (clone.querySelectorAll) clone.querySelectorAll('rt,rp,script,style,.passage-question-blank,.question-fixed-token').forEach(el => el.remove());
+                return (clone.textContent || '').replace(/\s+/g, ' ').trim();
+            }
+
+            function computeOccurrenceForRange20260612(editable, range, phrase) {
+                const needle = getNormalizeForFormat20260612(phrase);
+                if (!editable || !range || !needle) return 0;
+                const beforeRange = getRangeBefore20260612(editable, range.startContainer, range.startOffset);
+                const beforeText = getNormalizeForFormat20260612(getFormatSyncText20260612(beforeRange.cloneContents()));
+                return countOccurrences20260612(beforeText, needle);
+            }
+
+            function computeOccurrenceForElement20260612(editable, el, phrase) {
+                const needle = getNormalizeForFormat20260612(phrase);
+                if (!editable || !el || !needle) return 0;
+                const before = document.createRange();
+                before.selectNodeContents(editable);
+                try { before.setEndBefore(el); } catch (_) { return 0; }
+                const beforeText = getNormalizeForFormat20260612(getFormatSyncText20260612(before.cloneContents()));
+                return countOccurrences20260612(beforeText, needle);
+            }
+
+            function elementHasBothBoldAndUnderline20260612(el) {
+                if (!el || !el.closest) return false;
+                return !!(
+                    el.closest('b u, strong u, u b, u strong') ||
+                    (el.closest('b,strong') && el.closest('u')) ||
+                    el.closest('b[data-auto-underline], strong[data-auto-underline], u[data-auto-underline]')
+                );
+            }
+
+            function rangeHasBothBoldAndUnderline20260612(range, editable) {
+                if (!range || !editable || range.collapsed) return false;
+                const selector = 'b u, strong u, u b, u strong, b[data-auto-underline], strong[data-auto-underline], u[data-auto-underline]';
+                return Array.from(editable.querySelectorAll(selector)).some(el => {
+                    try { return range.intersectsNode(el) && getFormatSyncText20260612(el).trim(); }
+                    catch (_) { return false; }
+                });
+            }
+
+            findFirstFormattedUnderlinePhrase = function(editable, preferSelection = false) {
+                window.__lastUnderlineSyncMeta20260612 = null;
+                if (!editable) return '';
+
+                const selection = window.getSelection();
+                if (preferSelection && selection && selection.rangeCount) {
+                    const range = selection.getRangeAt(0);
+                    if (!range.collapsed && editable.contains(range.commonAncestorContainer) && rangeHasBothBoldAndUnderline20260612(range, editable)) {
+                        const selectedText = getFormatSyncText20260612(range.cloneContents());
+                        if (typeof isUsefulUnderlinePhrase !== 'function' || isUsefulUnderlinePhrase(selectedText)) {
+                            const occurrence = computeOccurrenceForRange20260612(editable, range, selectedText);
+                            window.__lastUnderlineSyncMeta20260612 = { text: selectedText, occurrence };
+                            return selectedText;
+                        }
+                    }
+                }
+
+                const candidates = Array.from(editable.querySelectorAll('b u, strong u, u b, u strong, b[data-auto-underline], strong[data-auto-underline], u[data-auto-underline]'));
+                for (const el of candidates) {
+                    if (!elementHasBothBoldAndUnderline20260612(el)) continue;
+                    const text = getFormatSyncText20260612(el);
+                    if (typeof isUsefulUnderlinePhrase === 'function' && !isUsefulUnderlinePhrase(text)) continue;
+                    const occurrence = computeOccurrenceForElement20260612(editable, el, text);
+                    window.__lastUnderlineSyncMeta20260612 = { text, occurrence };
+                    return text;
+                }
+                return '';
+            };
+
+            syncUnderlineFromQuestionTitleFormat = function(editable, gIdx, qIdx, options = {}) {
+                if (!editable || !editable.classList || !editable.classList.contains('question-title')) return false;
+                const sIdx = getSectionIndexFromEditable(editable);
+                const sec = examSections?.[sIdx];
+                if (!sec || !sec.features || !sec.features.hasUnderline) return false;
+
+                gIdx = Number.isInteger(gIdx) ? gIdx : parseInt(editable.getAttribute('data-g-idx'), 10);
+                qIdx = Number.isInteger(qIdx) ? qIdx : parseInt(editable.getAttribute('data-q-idx'), 10);
+                const q = sec.groups?.[gIdx]?.questions?.[qIdx];
+                if (!q) return false;
+
+                const oldUnderline = q.underline || '';
+                const oldOccurrence = parseInt(q.underlineOccurrence || 0, 10) || 0;
+                const found = findFirstFormattedUnderlinePhrase(editable, !!options.preferSelection);
+                const meta = window.__lastUnderlineSyncMeta20260612 || null;
+
+                if (found) {
+                    const occurrence = Math.max(0, parseInt(meta?.occurrence || 0, 10) || 0);
+                    q.underline = found;
+                    q.underlineOccurrence = occurrence;
+                    updateUnderlineInputUIFromQuestionTitle(editable, found);
+                    return oldUnderline !== found || oldOccurrence !== occurrence;
+                }
+
+                if (options.clearWhenMissing && oldUnderline) {
+                    q.underline = '';
+                    q.underlineOccurrence = 0;
+                    updateUnderlineInputUIFromQuestionTitle(editable, '');
+                    return true;
+                }
+                return false;
+            };
+
+            applyUnderlineByPhraseRange = function(holder, underlineWord, occurrenceIndex = 0) {
+                const variants = getUnderlineSearchVariants(underlineWord);
+                const targetOccurrence = Math.max(0, parseInt(occurrenceIndex || 0, 10) || 0);
+                for (const variant of variants) {
+                    const map = buildUnderlineLinearTextMap(holder);
+                    if (!variant || !map.text.includes(variant)) continue;
+                    const matches = [];
+                    let pos = 0;
+                    while ((pos = map.text.indexOf(variant, pos)) !== -1) {
+                        matches.push([pos, pos + variant.length]);
+                        pos += Math.max(1, variant.length);
+                    }
+                    if (!matches.length) continue;
+                    const chosen = matches[Math.min(targetOccurrence, matches.length - 1)] || matches[0];
+                    if (wrapUnderlineRange(holder, chosen[0], chosen[1], map.chars)) return true;
+                }
+                return false;
+            };
+
+            rebuildUnderlineFormatHtml = function(html, underlineWord = '', previousUnderline = '', occurrenceIndex = 0) {
+                underlineWord = (underlineWord || '').trim();
+                previousUnderline = (previousUnderline || '').trim();
+                const holder = document.createElement('div');
+                holder.innerHTML = cleanEditableHtml(html || '');
+                unwrapBrokenUnderlineFragments(holder, underlineWord, previousUnderline);
+                if (!underlineWord) return normalizeQuestionTokens(holder.innerHTML);
+                const appliedByPhrase = applyUnderlineByPhraseRange(holder, underlineWord, occurrenceIndex);
+                if (!appliedByPhrase) applyUnderlineFallbackTextNodes(holder, underlineWord);
+                normalizeAdjacentInlineFormatWrappers(holder);
+                return normalizeQuestionTokens(holder.innerHTML);
+            };
+
+            reapplyUnderlineFormat = function(gIdx, qIdx, previousUnderline = '') {
+                if (activeSectionIndex === -1) return;
+                const inputEl = document.getElementById(`qtitle-g${gIdx}-q${qIdx}`);
+                const sIdx = inputEl ? getSectionIndexFromEditable(inputEl) : activeSectionIndex;
+                const q = examSections?.[sIdx]?.groups?.[gIdx]?.questions?.[qIdx];
+                if (!q) return;
+                q.text = rebuildUnderlineFormatHtml(q.text || '', q.underline || '', previousUnderline || '', q.underlineOccurrence || 0);
+                if (inputEl && inputEl.innerHTML !== q.text) setEditableHtmlPreserveCaret(inputEl, q.text);
+            };
+
+            handleUnderlineInputWrapper = function(input, gIdx, qIdx) {
+                if (activeSectionIndex === -1) return;
+                const q = examSections?.[activeSectionIndex]?.groups?.[gIdx]?.questions?.[qIdx];
+                const previousUnderline = q ? (q.underline || '').trim() : '';
+                if (q) q.underlineOccurrence = 0; // nhập tay: ưu tiên lần đầu từ trái sang phải
+                syncInputData(input);
+                if (q) q.underlineOccurrence = 0;
+                reapplyUnderlineFormat(gIdx, qIdx, previousUnderline);
+                autoSave();
+            };
+
+            syncEditableAfterFormat = function(editable, meta = {}) {
+                if (!editable) return;
+                if (editable.classList.contains('bulk-exp-input')) handleBulkExplanationInput(editable);
+                else if (editable.classList.contains('bulk-note-input')) handleBulkNoteInput(editable);
+                else if (editable.classList.contains('dokkai-content')) syncPassage(parseInt(editable.getAttribute('data-g-idx')));
+                else {
+                    syncInputData(editable);
+                    if (editable.classList.contains('question-title')) {
+                        const gIdx = parseInt(editable.getAttribute('data-g-idx'), 10);
+                        const qIdx = parseInt(editable.getAttribute('data-q-idx'), 10);
+                        const sIdx = getSectionIndexFromEditable(editable);
+                        const q = examSections?.[sIdx]?.groups?.[gIdx]?.questions?.[qIdx];
+                        syncUnderlineFromQuestionTitleFormat(editable, gIdx, qIdx, {
+                            preferSelection: true,
+                            clearWhenMissing: true
+                        });
+                        if (q) q.text = cleanEditableHtml(editable.innerHTML || '');
+                        reapplyStarPosition(gIdx, qIdx);
+                    }
+                    autoSave();
+                }
+            };
+
+            const originalHandleQuestionTitlePaste20260612 = handleQuestionTitlePaste;
+            handleQuestionTitlePaste = function(event, input, gIdx, qIdx) {
+                const cd = event.clipboardData || window.clipboardData;
+                if (!cd) return;
+                event.preventDefault();
+                event.stopPropagation();
+                if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+                const html = sanitizeQuestionPasteHtml(cd.getData('text/html'), cd.getData('text/plain'));
+                insertHtmlAtCurrentCaret(html);
+                handleQuestionTitleInput(input, gIdx, qIdx);
+            };
+
+            document.addEventListener('paste', function(e) {
+                if (e.defaultPrevented) return;
+                const target = e.target;
+                if (target && target.closest && target.closest('.question-title')) {
+                    e.stopPropagation();
+                }
+            }, true);
+
+            function protectQuestionTokens20260612(text) {
+                const store = [];
+                const put = (m) => {
+                    const key = QUESTION_TOKEN_PLACEHOLDER_PREFIX_20260612 + store.length + '%%';
+                    store.push(m);
+                    return key;
+                };
+                const protectedText = String(text || '')
+                    .replace(/(?:&nbsp;|\u00A0|[ \t　]){0,3}(?:_{3,}|＿{3,}|___★___|＿★＿)(?:&nbsp;|\u00A0|[ \t　]){0,3}/g, put)
+                    .replace(/[（(][ \t　]{1,}[）)]/g, put)
+                    .replace(/<span\b[^>]*class=["'][^"']*(?:question-fixed-token|passage-question-blank|section-title-question-blank)[^"']*["'][\s\S]*?<\/span>/gi, put);
+                return { protectedText, store };
+            }
+
+            function restoreQuestionTokens20260612(text, store) {
+                let out = String(text || '');
+                (store || []).forEach((value, idx) => {
+                    out = out.split(QUESTION_TOKEN_PLACEHOLDER_PREFIX_20260612 + idx + '%%').join(value);
+                });
+                return out;
+            }
+
+            function removeJapaneseInnerSpaces20260612(value) {
+                const { protectedText, store } = protectQuestionTokens20260612(value || '');
+                let out = protectedText;
+                out = out.replace(/([\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff々〆ヶ])(?:&nbsp;|\u00A0|[ \t　])+([\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff々〆ヶ])/g, '$1$2');
+                out = out.replace(/([\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff々〆ヶ])(?:&nbsp;|\u00A0|[ \t　])+([、。！？・，．：；）」』】])/g, '$1$2');
+                out = out.replace(/([「『【（(])(?:&nbsp;|\u00A0|[ \t　])+([\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff々〆ヶ])/g, '$1$2');
+                return restoreQuestionTokens20260612(out, store);
+            }
+
+            const originalDeepCleanCurrentExamData20260612 = deepCleanCurrentExamData;
+            deepCleanCurrentExamData = function() {
+                const stats = originalDeepCleanCurrentExamData20260612 ? originalDeepCleanCurrentExamData20260612() : { changed: 0 };
+                const cleanSpaces = (value) => {
+                    const before = String(value || '');
+                    const after = removeJapaneseInnerSpaces20260612(before);
+                    if (after !== before) stats.changed = (stats.changed || 0) + 1;
+                    return after;
+                };
+                (examSections || []).forEach(sec => {
+                    if (typeof sec.title === 'string') sec.title = cleanSpaces(sec.title);
+                    (sec.groups || []).forEach(g => {
+                        if (typeof g.passageHTML === 'string') g.passageHTML = cleanSpaces(g.passageHTML);
+                        (g.questions || []).forEach(q => {
+                            if (typeof q.text === 'string') q.text = cleanSpaces(q.text);
+                            if (Array.isArray(q.options)) q.options = q.options.map(opt => typeof opt === 'string' ? cleanSpaces(opt) : opt);
+                            if (typeof q.explanation === 'string') q.explanation = cleanSpaces(q.explanation);
+                            if (typeof q.note === 'string') q.note = cleanSpaces(q.note);
+                            if (typeof q.underline === 'string') q.underline = plainTextDeepClean(cleanSpaces(q.underline));
+                        });
+                    });
+                });
+                return stats;
+            };
+
+            function getWordExportSectionIndexesFromOptions20260612(exportOptions = {}) {
+                if (!exportOptions || !Array.isArray(exportOptions.wordSectionIndexes)) return null;
+                return new Set(exportOptions.wordSectionIndexes.map(idx => String(idx)));
+            }
+
+            shouldExportWordSection = function(sIdx, exportOptions = {}) {
+                const selectedSet = getWordExportSectionIndexesFromOptions20260612(exportOptions);
+                if (!selectedSet) return true;
+                return selectedSet.has(String(sIdx));
+            };
+
+            const originalCollectAnswerExplanationRowsForTable20260612 = collectAnswerExplanationRowsForTable;
+            collectAnswerExplanationRowsForTable = function(exportOptions = {}) {
+                if (!getWordExportSectionIndexesFromOptions20260612(exportOptions)) {
+                    return originalCollectAnswerExplanationRowsForTable20260612(exportOptions);
+                }
+                const rows = [];
+                const sectionNumberByPart = {};
+                (examSections || []).forEach((sec, sIdx) => {
+                    if (!shouldExportWordSection(sIdx, exportOptions)) return;
+                    const partName = getAnswerTablePartName(sec.parentType);
+                    sectionNumberByPart[sec.parentType] = (sectionNumberByPart[sec.parentType] || 0) + 1;
+                    const mondaiLabel = getMondaiLabelForAnswerTable(sec, sectionNumberByPart[sec.parentType]);
+                    const includeExplanationForThisSection = shouldExportExplanationForSection(sIdx, exportOptions);
+                    (sec.groups || []).forEach((group, gIdx) => {
+                        (group.questions || []).forEach((q, qIdx) => {
+                            ensureQuestionExplanationFields(q);
+                            const parsed = includeExplanationForThisSection
+                                ? parseAnswerExplanationForTable(q.explanation || '')
+                                : { entries: [{ kanji: '', hanviet: '', hiragana: '', meaning: '' }], note: '' };
+                            const noteText = includeExplanationForThisSection
+                                ? (getPlainTextFromHtmlForAnswerTable(q.note || '') || parsed.note || '')
+                                : '';
+                            const qLabel = 'Câu ' + (q.id || (qIdx + 1));
+                            const answer = answerChoiceToNumber(q.correct || '');
+                            parsed.entries.forEach(entry => {
+                                rows.push({
+                                    partKey: partName,
+                                    mondaiKey: partName + '||' + mondaiLabel,
+                                    questionKey: partName + '||' + mondaiLabel + '||' + sIdx + '||' + gIdx + '||' + (q.id || qIdx),
+                                    part: partName,
+                                    mondai: mondaiLabel,
+                                    question: qLabel,
+                                    answer,
+                                    kanji: includeExplanationForThisSection ? (entry.kanji || '') : '',
+                                    hanviet: includeExplanationForThisSection ? (entry.hanviet || '') : '',
+                                    hiragana: includeExplanationForThisSection ? (entry.hiragana || '') : '',
+                                    meaning: includeExplanationForThisSection ? (entry.meaning || '') : '',
+                                    note: includeExplanationForThisSection ? (noteText || '') : ''
+                                });
+                            });
+                        });
+                    });
+                });
+                return addAnswerTableRowSpans(rows);
+            };
+
+            renderOptionCellForExport = function(q, optionIndex, widthPercent, isAnswerKey) {
+                const correctIndex = optionLetterToIndex(q.correct);
+                const isCorrect = isAnswerKey && correctIndex === optionIndex;
+                let optionHtml = prepareInlineHtmlForExport(isAnswerKey ? stripFuriganaHtml((q.options && q.options[optionIndex]) || '') : ((q.options && q.options[optionIndex]) || ''));
+                if (isCorrect) optionHtml = optionHtml.replace(/&lt;\/?(?:b|strong)(?:\s+[^&]*?)?&gt;/gi, '').replace(/<\/?(?:b|strong)(?:\s+[^>]*)?>/gi, '');
+                const textColor = isCorrect ? '#b91c1c' : '#000000';
+                const fontWeight = '400';
+                const optionLabel = isAnswerKey ? ['A', 'B', 'C', 'D'][optionIndex] : String(optionIndex + 1);
+                const labelHtml = isCorrect ? `<span style="font-weight:400;">${optionLabel}.</span>` : `<b>${optionLabel}.</b>`;
+                return "<td style='width:" + widthPercent + "%; border:none !important; padding:0 5px 0 0; vertical-align:top;'>" +
+                       "<p style='margin-top:0pt; margin-bottom:0pt; line-height:1.3; color:" + textColor + "; font-weight:" + fontWeight + ";'>" + labelHtml + " " + optionHtml + "</p>" +
+                       "</td>";
+            };
+
+            const originalBuildWordExportSectionOrdinalMap20260612 = buildWordExportSectionOrdinalMap;
+            buildWordExportSectionOrdinalMap = function(exportOptions = {}) {
+                const map = {};
+                let ordinal = 0;
+                (examSections || []).forEach((sec, sIdx) => {
+                    if (!shouldExportWordSection(sIdx, exportOptions)) return;
+                    if (countQuestionsInSectionForWordExport(sec) > 0) {
+                        ordinal++;
+                        map[sIdx] = ordinal;
+                    }
+                });
+                return map;
+            };
+
+            collectWordExportQuestionRefs = function(isAnswerKey, exportOptions = {}) {
+                const refs = [];
+                let index = 0;
+                (examSections || []).forEach((sec, sIdx) => {
+                    if (!shouldExportWordSection(sIdx, exportOptions)) return;
+                    (sec.groups || []).forEach((group, gIdx) => {
+                        (group.questions || []).forEach((q, qIdx) => {
+                            refs.push({ index, sIdx, gIdx, qIdx, q, approxChars: estimateWordExportQuestionWeight(q, group, isAnswerKey) });
+                            index++;
+                        });
+                    });
+                });
+                return refs;
+            };
+
+            buildWordExportAutoSplitChunks = function(isAnswerKey, exportOptions = {}) {
+                const refs = collectWordExportQuestionRefs(isAnswerKey, exportOptions);
+                if (refs.length === 0) return [];
+                const chunks = [];
+                let start = 0;
+                let approxChars = 0;
+                refs.forEach((ref, localIdx) => {
+                    const currentCount = localIdx - start;
+                    const wouldBeTooManyQuestions = currentCount >= WORD_EXPORT_AUTO_SPLIT_MAX_QUESTIONS;
+                    const wouldBeTooHeavy = currentCount > 0 && (approxChars + ref.approxChars > WORD_EXPORT_AUTO_SPLIT_MAX_APPROX_CHARS);
+                    if (wouldBeTooManyQuestions || wouldBeTooHeavy) {
+                        chunks.push({ start, end: localIdx });
+                        start = localIdx;
+                        approxChars = 0;
+                    }
+                    approxChars += ref.approxChars;
+                });
+                if (start < refs.length) chunks.push({ start, end: refs.length });
+                return chunks.map((chunk, idx) => {
+                    const firstRef = refs[chunk.start];
+                    const lastRef = refs[chunk.end - 1];
+                    return { ...chunk, partIndex: idx + 1, totalParts: chunks.length, firstQuestionId: getWordExportQuestionDisplayId(firstRef), lastQuestionId: getWordExportQuestionDisplayId(lastRef) };
+                });
+            };
+
+            cloneExportOptionsWithWordRange = function(exportOptions, chunk, sectionOrdinalMap) {
+                return {
+                    ...(exportOptions || {}),
+                    wordExportQuestionRange: { start: chunk.start, end: chunk.end },
+                    wordExportSectionOrdinalMap: sectionOrdinalMap || buildWordExportSectionOrdinalMap(exportOptions || {}),
+                    wordExportSplitLabel: `TẬP ${String(chunk.partIndex).padStart(2, '0')}/${String(chunk.totalParts).padStart(2, '0')} · CÂU ${chunk.firstQuestionId}-${chunk.lastQuestionId}`
+                };
+            };
+
+            downloadWordDocxWithAutoSplit = async function({ filename, isAnswerKey, addPartTitles, includeAnswerExplanationTable = false, exportOptions = {}, fileSuffix }) {
+                const chunks = buildWordExportAutoSplitChunks(isAnswerKey, exportOptions);
+                if (!chunks.length) {
+                    alert('Không có câu hỏi nào trong Mondai đã chọn để xuất Word.');
+                    return { partCount: 0, questionCount: 0 };
+                }
+                const sectionOrdinalMap = buildWordExportSectionOrdinalMap(exportOptions);
+                if (chunks.length <= 1) {
+                    window.__wordPassageImageMap = null;
+                    const html = generateHtmlForPrintOrExport(isAnswerKey, addPartTitles, true, includeAnswerExplanationTable, { ...exportOptions, wordExportSectionOrdinalMap: sectionOrdinalMap });
+                    const blob = htmlDocx.asBlob(html);
+                    triggerWordDocxDownload(blob, filename + fileSuffix + '.docx');
+                    return { partCount: 1, questionCount: chunks[0].end - chunks[0].start };
+                }
+                for (const chunk of chunks) {
+                    window.__wordPassageImageMap = null;
+                    const chunkOptions = cloneExportOptionsWithWordRange(exportOptions, chunk, sectionOrdinalMap);
+                    const html = generateHtmlForPrintOrExport(isAnswerKey, addPartTitles, true, includeAnswerExplanationTable, chunkOptions);
+                    const blob = htmlDocx.asBlob(html);
+                    const partNo = String(chunk.partIndex).padStart(2, '0');
+                    const downloadName = `${filename}${fileSuffix}_Tap_${partNo}_Cau_${chunk.firstQuestionId}-${chunk.lastQuestionId}.docx`;
+                    triggerWordDocxDownload(blob, downloadName);
+                    await sleepWordExport(WORD_EXPORT_AUTO_SPLIT_CLICK_DELAY_MS);
+                }
+                return { partCount: chunks.length, questionCount: chunks[chunks.length - 1].end };
+            };
+
+            const originalGenerateHtmlForPrintOrExport20260612 = generateHtmlForPrintOrExport;
+            generateHtmlForPrintOrExport = function(isAnswerKey, addPartTitles = false, forWordDoc = true, includeAnswerExplanationTable = false, exportOptions = {}) {
+                // Dùng lại lõi cũ nếu xuất toàn bộ. Khi chọn Mondai, tạo bản tạm chỉ gồm Mondai được chọn để range/số Phần không lệch.
+                if (!getWordExportSectionIndexesFromOptions20260612(exportOptions)) {
+                    return originalGenerateHtmlForPrintOrExport20260612(isAnswerKey, addPartTitles, forWordDoc, includeAnswerExplanationTable, exportOptions);
+                }
+                const oldSections = examSections;
+                try {
+                    const selected = getWordExportSectionIndexesFromOptions20260612(exportOptions);
+                    examSections = (oldSections || []).filter((_, idx) => selected.has(String(idx)));
+                    const remappedExplanation = Array.isArray(exportOptions.explanationSectionIndexes)
+                        ? examSections.map((sec, newIdx) => {
+                            const oldIdx = oldSections.indexOf(sec);
+                            return exportOptions.explanationSectionIndexes.map(String).includes(String(oldIdx)) ? newIdx : null;
+                        }).filter(idx => idx !== null)
+                        : exportOptions.explanationSectionIndexes;
+                    const nextOptions = { ...exportOptions, wordSectionIndexes: null, explanationSectionIndexes: remappedExplanation, wordExportSectionOrdinalMap: null };
+                    return originalGenerateHtmlForPrintOrExport20260612(isAnswerKey, addPartTitles, forWordDoc, includeAnswerExplanationTable, nextOptions);
+                } finally {
+                    examSections = oldSections;
+                }
+            };
+
+            let exportWordSelectionCache20260612 = null;
+
+            function getWordExportSelectedIndexesFromDOM20260612() {
+                const boxes = Array.from(document.querySelectorAll('.export-word-mondai-check'));
+                return boxes.filter(box => box.checked).map(box => parseInt(box.getAttribute('data-sidx'), 10)).filter(idx => !Number.isNaN(idx));
+            }
+
+            function updateWordExportStatus20260612() {
+                const status = document.getElementById('export-word-scope-status');
+                const boxes = Array.from(document.querySelectorAll('.export-word-mondai-check'));
+                if (!status) return;
+                const total = boxes.length;
+                const selected = boxes.filter(box => box.checked).length;
+                status.classList.toggle('warning', selected === 0);
+                if (!total) status.textContent = 'Chưa có Mondai nào để xuất.';
+                else if (selected === 0) status.textContent = 'Đang bỏ chọn toàn bộ: bấm chọn ít nhất 1 Mondai để xuất file.';
+                else if (selected === total) status.textContent = 'Đang xuất toàn bộ Mondai.';
+                else status.textContent = 'Chỉ xuất ' + selected + '/' + total + ' Mondai đã tick.';
+            }
+
+            function cacheWordExportSelectionFromDOM20260612() {
+                exportWordSelectionCache20260612 = new Set(getWordExportSelectedIndexesFromDOM20260612().map(idx => String(idx)));
+                updateWordExportStatus20260612();
+            }
+
+            renderWordExportMondaiControls20260612 = function() {
+                const container = document.getElementById('export-word-mondai-list');
+                if (!container) return;
+                const activeIndexes = (examSections || []).map((_, idx) => String(idx));
+                const cacheUsable = exportWordSelectionCache20260612 instanceof Set && activeIndexes.some(idx => exportWordSelectionCache20260612.has(idx));
+                const selectedSet = cacheUsable ? exportWordSelectionCache20260612 : new Set(activeIndexes);
+                if (!examSections || !examSections.length) {
+                    container.innerHTML = '<div style="font-size:12px;color:#64748b;font-weight:700;">Chưa có Mondai nào để chọn.</div>';
+                    updateWordExportStatus20260612();
+                    return;
+                }
+                container.innerHTML = examSections.map((sec, sIdx) => {
+                    const mondaiName = getExportMondaiTitleForControl(sec, sIdx);
+                    const partName = parentLabels[sec.parentType] || sec.parentType || 'Phần';
+                    const count = getExportMondaiQuestionCount(sec);
+                    const checked = selectedSet.has(String(sIdx)) ? 'checked' : '';
+                    const titleText = getPlainTextFromHtmlForAnswerTable(refreshSectionTitleBlankLabels(sec.title || '', sec)).replace(/\s+/g, ' ').trim();
+                    const shortTitle = titleText && titleText !== mondaiName ? titleText : (sec.label || '');
+                    return `
+                        <label class="export-explanation-mondai-option" title="${answerTableEscapeHtml(titleText || mondaiName)}">
+                            <input type="checkbox" class="export-word-mondai-check" data-sidx="${sIdx}" ${checked} onchange="cacheWordExportSelectionFromDOM20260612()">
+                            <span class="export-explanation-mondai-text">
+                                <span class="export-explanation-mondai-name">${answerTableEscapeHtml(mondaiName)} · ${answerTableEscapeHtml(partName)}</span>
+                                <span class="export-explanation-mondai-meta">${count} câu${shortTitle ? ' · ' + answerTableEscapeHtml(shortTitle) : ''}</span>
+                            </span>
+                        </label>
+                    `;
+                }).join('');
+                cacheWordExportSelectionFromDOM20260612();
+            };
+
+            setWordExportSelection20260612 = function(mode) {
+                const boxes = Array.from(document.querySelectorAll('.export-word-mondai-check'));
+                if (!boxes.length) return;
+                boxes.forEach(box => {
+                    const sIdx = parseInt(box.getAttribute('data-sidx'), 10);
+                    if (mode === 'all') box.checked = true;
+                    else if (mode === 'none') box.checked = false;
+                    else if (mode === 'active') box.checked = sIdx === activeSectionIndex;
+                });
+                cacheWordExportSelectionFromDOM20260612();
+            };
+
+            const originalGetExportExplanationOptionsFromModal20260612 = getExportExplanationOptionsFromModal;
+            getExportExplanationOptionsFromModal = function() {
+                const opts = originalGetExportExplanationOptionsFromModal20260612 ? originalGetExportExplanationOptionsFromModal20260612() : { explanationSectionIndexes: [] };
+                const selectedWordIndexes = getWordExportSelectedIndexesFromDOM20260612();
+                const total = (examSections || []).length;
+                opts.wordSectionIndexes = (selectedWordIndexes.length === total) ? null : selectedWordIndexes;
+                return opts;
+            };
+
+            const originalOpenExportModal20260612 = openExportModal;
+            openExportModal = function() {
+                originalOpenExportModal20260612();
+                const explanationPanel = document.querySelector('.export-explanation-scope-panel');
+                if (explanationPanel && !document.getElementById('export-word-scope-panel')) {
+                    const panel = document.createElement('div');
+                    panel.id = 'export-word-scope-panel';
+                    panel.className = 'export-explanation-scope-panel';
+                    panel.style.marginTop = '12px';
+                    panel.innerHTML = `
+                        <div class="export-explanation-scope-head">
+                            <div>
+                                <div class="export-explanation-scope-title">🖨️ Chọn Mondai được xuất/in</div>
+                                <div class="export-explanation-scope-desc">Áp dụng cho <b>Word học sinh</b>, <b>Word giáo viên</b> và <b>Excel đáp án</b>. Tick Mondai nào thì file chỉ xuất Mondai đó.</div>
+                            </div>
+                            <div class="export-explanation-scope-actions">
+                                <button type="button" onclick="setWordExportSelection20260612('all')">Xuất tất cả</button>
+                                <button type="button" onclick="setWordExportSelection20260612('active')">Chỉ Mondai đang mở</button>
+                                <button type="button" onclick="setWordExportSelection20260612('none')">Bỏ hết</button>
+                            </div>
+                        </div>
+                        <div id="export-word-mondai-list" class="export-explanation-mondai-list"></div>
+                        <div id="export-word-scope-status" class="export-explanation-scope-status"></div>
+                    `;
+                    explanationPanel.insertAdjacentElement('afterend', panel);
+                }
+                renderWordExportMondaiControls20260612();
+            };
+        })();
+
+
+        // ==========================================
+        // PATCH 2026-06-12B: GỘP RUBY KANJI BỊ TÁCH + XÓA FORMAT KHI Ô GẠCH CHÂN RỖNG
+        // - Khi bật furigana, nếu một cụm Kanji bị tách thành nhiều ruby do space/kana reading chen giữa
+        //   và cụm đó trùng với "Từ tự in đậm & gạch dưới", tự gộp lại thành 1 ruby: 家 + 具 -> 家具.
+        // - Nếu ô "Từ tự in đậm & gạch dưới" bị xóa rỗng, câu hỏi cũng được gỡ B+U thật sự.
+        // - Không thay cơ chế Ctrl+B/Ctrl+U; chỉ dọn lại dữ liệu sau khi thao tác.
+        // ==========================================
+        (function installFuriganaMergeUnderlineClearPatch20260612B(){
+            if (window.__furiganaMergeUnderlineClearPatch20260612BInstalled) return;
+            window.__furiganaMergeUnderlineClearPatch20260612BInstalled = true;
+
+            const KANJI_ONLY_RE_20260612B = /^[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF々〆ヶ]+$/;
+            const KANA_ONLY_RE_20260612B = /^[\u3040-\u30FFー・･]+$/;
+            const RUBY_SELECTOR_20260612B = 'ruby.furigana-ruby, ruby';
+
+            function normalizeTargetPhrase20260612B(value) {
+                try {
+                    if (typeof stripInlineReadingForUnderline === 'function') {
+                        return stripInlineReadingForUnderline(value || '');
+                    }
+                    if (typeof normalizeTextForFormatSync === 'function') {
+                        return normalizeTextForFormatSync(value || '');
+                    }
+                } catch (_) {}
+                return String(value || '')
+                    .replace(/&nbsp;/g, ' ')
+                    .replace(/[\u00A0\u1680\u180E\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]/g, ' ')
+                    .replace(/[　\s]+/g, '')
+                    .replace(/([\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF々〆ヶ]+)\(([ぁ-んァ-ンー・･]+)\)/g, '$1')
+                    .trim();
+            }
+
+            function getRubyBase20260612B(ruby) {
+                if (!ruby) return '';
+                try {
+                    if (typeof getRubyBaseText === 'function') return (getRubyBaseText(ruby) || '').trim();
+                } catch (_) {}
+                const clone = ruby.cloneNode(true);
+                clone.querySelectorAll('rt,rp').forEach(el => el.remove());
+                return (ruby.getAttribute('data-base') || clone.textContent || '').trim();
+            }
+
+            function getRubyReading20260612B(ruby) {
+                if (!ruby) return '';
+                const rt = ruby.querySelector('rt');
+                return (ruby.getAttribute('data-reading') || (rt ? rt.textContent : '') || '').trim();
+            }
+
+            function setRubyContent20260612B(ruby, base, reading) {
+                if (!ruby || !base) return;
+                ruby.classList.add('furigana-ruby');
+                ruby.setAttribute('data-base', base);
+                ruby.setAttribute('data-reading', reading || '');
+                ruby.setAttribute('contenteditable', 'false');
+                while (ruby.firstChild) ruby.removeChild(ruby.firstChild);
+                ruby.appendChild(document.createTextNode(base));
+                const rt = document.createElement('rt');
+                rt.textContent = reading || '';
+                ruby.appendChild(rt);
+            }
+
+            function isRubyElement20260612B(node) {
+                return !!(node && node.nodeType === Node.ELEMENT_NODE && node.tagName === 'RUBY');
+            }
+
+            function getMergeSeparatorInfo20260612B(node, leftReading, rightReading) {
+                if (!node || node.nodeType !== Node.TEXT_NODE) return null;
+                const raw = node.nodeValue || '';
+                const compact = raw.replace(/(?:&nbsp;|\u00A0|[ \t\r\n　])+/g, '');
+                if (!compact) return { canMerge: true, separator: '', kind: 'space' };
+
+                // Chỉ coi kana chen giữa là "rác furigana" khi nó trùng với reading của ruby bên trái/phải.
+                // Nhờ vậy không phá các từ đúng kiểu 取り消す / 乗り換える / 受け取る.
+                if (
+                    KANA_ONLY_RE_20260612B.test(compact) &&
+                    compact.length <= 3 &&
+                    (
+                        (rightReading && rightReading.startsWith(compact)) ||
+                        (leftReading && leftReading.endsWith(compact)) ||
+                        (leftReading && rightReading && (leftReading + rightReading).includes(compact))
+                    )
+                ) {
+                    return { canMerge: true, separator: compact, kind: 'duplicated-kana' };
+                }
+                return null;
+            }
+
+            function shouldMergeRubyPair20260612B(leftRuby, sepNode, rightRuby, targetSet) {
+                if (!leftRuby || !rightRuby) return false;
+                const leftBase = getRubyBase20260612B(leftRuby);
+                const rightBase = getRubyBase20260612B(rightRuby);
+                if (!KANJI_ONLY_RE_20260612B.test(leftBase) || !KANJI_ONLY_RE_20260612B.test(rightBase)) return false;
+
+                const leftReading = getRubyReading20260612B(leftRuby);
+                const rightReading = getRubyReading20260612B(rightRuby);
+                const sep = getMergeSeparatorInfo20260612B(sepNode, leftReading, rightReading);
+                if (!sep || !sep.canMerge) return false;
+
+                const mergedBase = leftBase + rightBase;
+                if (targetSet && targetSet.size && !targetSet.has(normalizeTargetPhrase20260612B(mergedBase))) {
+                    return false;
+                }
+                return true;
+            }
+
+            function mergeRubyPair20260612B(leftRuby, sepNode, rightRuby) {
+                const leftBase = getRubyBase20260612B(leftRuby);
+                const rightBase = getRubyBase20260612B(rightRuby);
+                const leftReading = getRubyReading20260612B(leftRuby);
+                const rightReading = getRubyReading20260612B(rightRuby);
+                const sep = getMergeSeparatorInfo20260612B(sepNode, leftReading, rightReading);
+
+                let reading = (leftReading || '') + (rightReading || '');
+                if (sep && sep.kind === 'duplicated-kana' && !reading) reading = sep.separator || '';
+                setRubyContent20260612B(leftRuby, leftBase + rightBase, reading);
+                if (sepNode && sepNode.parentNode) sepNode.remove();
+                if (rightRuby && rightRuby.parentNode) rightRuby.remove();
+            }
+
+            function mergeBrokenFuriganaRubiesInHolder20260612B(holder, targetPhrases = []) {
+                if (!holder || !holder.querySelectorAll) return false;
+
+                const targetSet = new Set(
+                    (targetPhrases || [])
+                        .map(v => normalizeTargetPhrase20260612B(v))
+                        .filter(Boolean)
+                );
+                if (!targetSet.size) return false;
+
+                try {
+                    if (typeof normalizeExistingFuriganaRuby === 'function') normalizeExistingFuriganaRuby(holder);
+                } catch (_) {}
+
+                let changed = false;
+                const parents = [holder, ...Array.from(holder.querySelectorAll('*'))];
+
+                // Lặp vài vòng để gộp được từ 3 kanji trở lên: 経 + 済 + 政 + 策 -> 経済政策.
+                for (let pass = 0; pass < 6; pass++) {
+                    let passChanged = false;
+                    parents.forEach(parent => {
+                        if (!parent || !parent.childNodes) return;
+                        let node = parent.firstChild;
+                        while (node) {
+                            if (!isRubyElement20260612B(node)) {
+                                node = node.nextSibling;
+                                continue;
+                            }
+
+                            const sepNode = node.nextSibling;
+                            const rightRuby = sepNode && sepNode.nextSibling;
+                            if (sepNode && isRubyElement20260612B(rightRuby) && shouldMergeRubyPair20260612B(node, sepNode, rightRuby, targetSet)) {
+                                mergeRubyPair20260612B(node, sepNode, rightRuby);
+                                passChanged = true;
+                                changed = true;
+                                continue;
+                            }
+                            node = node.nextSibling;
+                        }
+                    });
+                    if (!passChanged) break;
+                }
+                return changed;
+            }
+
+            function normalizeBrokenFuriganaRubyHtml20260612B(html, targetPhrases = []) {
+                const holder = document.createElement('div');
+                holder.innerHTML = String(html || '');
+                const changed = mergeBrokenFuriganaRubiesInHolder20260612B(holder, targetPhrases);
+                if (changed && typeof normalizeAdjacentInlineFormatWrappers === 'function') {
+                    try { normalizeAdjacentInlineFormatWrappers(holder); } catch (_) {}
+                }
+                return holder.innerHTML;
+            }
+
+            function unwrapNodeKeepChildren20260612B(el) {
+                if (!el || !el.parentNode) return false;
+                const frag = document.createDocumentFragment();
+                while (el.firstChild) frag.appendChild(el.firstChild);
+                el.parentNode.replaceChild(frag, el);
+                return true;
+            }
+
+            function elementHasBoldUnderlineRelation20260612B(el) {
+                if (!el || !el.closest) return false;
+                const tag = (el.tagName || '').toLowerCase();
+                if (!['b', 'strong', 'u'].includes(tag)) return false;
+                if (el.hasAttribute('data-auto-underline')) return true;
+                const selfIsBold = tag === 'b' || tag === 'strong';
+                const selfIsUnderline = tag === 'u';
+                const hasBold = selfIsBold || !!el.closest('b,strong') || !!el.querySelector('b,strong');
+                const hasUnderline = selfIsUnderline || !!el.closest('u') || !!el.querySelector('u');
+                return hasBold && hasUnderline;
+            }
+
+            function removeBoldUnderlinePairsHtml20260612B(html) {
+                const holder = document.createElement('div');
+                holder.innerHTML = cleanEditableHtml(String(html || ''));
+
+                // Gỡ wrapper có quan hệ vừa B vừa U, nhưng giữ nguyên chữ/ruby bên trong.
+                for (let pass = 0; pass < 5; pass++) {
+                    const targets = Array.from(holder.querySelectorAll('b,strong,u'))
+                        .filter(elementHasBoldUnderlineRelation20260612B)
+                        .sort((a, b) => (typeof elementDepthForFormat === 'function' ? elementDepthForFormat(b) - elementDepthForFormat(a) : 0));
+                    if (!targets.length) break;
+                    targets.forEach(unwrapNodeKeepChildren20260612B);
+                }
+
+                if (typeof normalizeAdjacentInlineFormatWrappers === 'function') {
+                    try { normalizeAdjacentInlineFormatWrappers(holder); } catch (_) {}
+                }
+                return typeof normalizeQuestionTokens === 'function' ? normalizeQuestionTokens(holder.innerHTML) : holder.innerHTML;
+            }
+
+            const previousRebuildUnderlineFormatHtml20260612B = typeof rebuildUnderlineFormatHtml === 'function' ? rebuildUnderlineFormatHtml : null;
+            if (previousRebuildUnderlineFormatHtml20260612B) {
+                rebuildUnderlineFormatHtml = function(html, underlineWord = '', previousUnderline = '', occurrenceIndex = 0) {
+                    const targets = [underlineWord, previousUnderline].filter(Boolean);
+                    const mergedBefore = normalizeBrokenFuriganaRubyHtml20260612B(html || '', targets);
+
+                    if (!(underlineWord || '').trim()) {
+                        return removeBoldUnderlinePairsHtml20260612B(mergedBefore);
+                    }
+
+                    const out = previousRebuildUnderlineFormatHtml20260612B(mergedBefore, underlineWord, previousUnderline, occurrenceIndex);
+                    return normalizeBrokenFuriganaRubyHtml20260612B(out, targets);
+                };
+            }
+
+            const previousHandleUnderlineInputWrapper20260612B = typeof handleUnderlineInputWrapper === 'function' ? handleUnderlineInputWrapper : null;
+            if (previousHandleUnderlineInputWrapper20260612B) {
+                handleUnderlineInputWrapper = function(input, gIdx, qIdx) {
+                    if (activeSectionIndex === -1) return;
+                    const q = examSections?.[activeSectionIndex]?.groups?.[gIdx]?.questions?.[qIdx];
+                    const previousUnderline = q ? (q.underline || '').trim() : '';
+                    syncInputData(input);
+
+                    if (q && !(q.underline || '').trim()) {
+                        q.underline = '';
+                        q.underlineOccurrence = 0;
+                        const inputEl = document.getElementById(`qtitle-g${gIdx}-q${qIdx}`);
+                        const sourceHtml = inputEl ? inputEl.innerHTML : (q.text || '');
+                        q.text = removeBoldUnderlinePairsHtml20260612B(sourceHtml);
+                        if (inputEl && inputEl.innerHTML !== q.text) setEditableHtmlPreserveCaret(inputEl, q.text);
+                        autoSave();
+                        return;
+                    }
+
+                    // Nhập tay một cụm mới: ưu tiên lần xuất hiện đầu tiên từ trái sang phải như bản trước.
+                    if (q) q.underlineOccurrence = 0;
+                    previousHandleUnderlineInputWrapper20260612B(input, gIdx, qIdx);
+                };
+            }
+
+            const previousHandleQuestionTitleInput20260612B = typeof handleQuestionTitleInput === 'function' ? handleQuestionTitleInput : null;
+            if (previousHandleQuestionTitleInput20260612B) {
+                handleQuestionTitleInput = function(input, gIdx, qIdx) {
+                    const sIdxBefore = input ? getSectionIndexFromEditable(input) : activeSectionIndex;
+                    const qBefore = examSections?.[sIdxBefore]?.groups?.[gIdx]?.questions?.[qIdx];
+                    if (isFuriganaMode && input && qBefore && (qBefore.underline || '').trim()) {
+                        const merged = normalizeBrokenFuriganaRubyHtml20260612B(input.innerHTML || '', [qBefore.underline]);
+                        if (merged !== input.innerHTML) setEditableHtmlPreserveCaret(input, merged);
+                    }
+
+                    previousHandleQuestionTitleInput20260612B(input, gIdx, qIdx);
+
+                    // Nếu trong ô câu hỏi không còn cụm vừa B vừa U thì ô trạng thái cũng tắt.
+                    if (input && input.classList && input.classList.contains('question-title')) {
+                        const changed = syncUnderlineFromQuestionTitleFormat(input, gIdx, qIdx, {
+                            preferSelection: false,
+                            clearWhenMissing: true
+                        });
+
+                        const sIdx = getSectionIndexFromEditable(input);
+                        const q = examSections?.[sIdx]?.groups?.[gIdx]?.questions?.[qIdx];
+                        if (q && (q.underline || '').trim()) {
+                            const mergedData = normalizeBrokenFuriganaRubyHtml20260612B(q.text || input.innerHTML || '', [q.underline]);
+                            if (mergedData !== q.text) {
+                                q.text = mergedData;
+                                if (input.innerHTML !== mergedData) setEditableHtmlPreserveCaret(input, mergedData);
+                            }
+                        } else if (changed) {
+                            autoSave();
+                        }
+                    }
+                };
+            }
+
+            const previousApplyFuriganaToQuestionData20260612B = typeof applyFuriganaToQuestionData === 'function' ? applyFuriganaToQuestionData : null;
+            if (previousApplyFuriganaToQuestionData20260612B) {
+                applyFuriganaToQuestionData = function(q) {
+                    previousApplyFuriganaToQuestionData20260612B(q);
+                    if (q && (q.underline || '').trim()) {
+                        q.text = normalizeBrokenFuriganaRubyHtml20260612B(q.text || '', [q.underline]);
+                    }
+                };
+            }
+
+            const previousSyncEditableAfterFormat20260612B = typeof syncEditableAfterFormat === 'function' ? syncEditableAfterFormat : null;
+            if (previousSyncEditableAfterFormat20260612B) {
+                syncEditableAfterFormat = function(editable, meta = {}) {
+                    previousSyncEditableAfterFormat20260612B(editable, meta);
+
+                    if (!editable || !editable.classList || !editable.classList.contains('question-title')) return;
+                    const gIdx = parseInt(editable.getAttribute('data-g-idx'), 10);
+                    const qIdx = parseInt(editable.getAttribute('data-q-idx'), 10);
+                    const sIdx = getSectionIndexFromEditable(editable);
+                    const q = examSections?.[sIdx]?.groups?.[gIdx]?.questions?.[qIdx];
+
+                    if (q && (q.underline || '').trim()) {
+                        const merged = normalizeBrokenFuriganaRubyHtml20260612B(editable.innerHTML || q.text || '', [q.underline]);
+                        if (merged !== editable.innerHTML) setEditableHtmlPreserveCaret(editable, merged);
+                        q.text = merged;
+                    } else if (q && meta && meta.command === 'underline' && meta.toggledOff === true) {
+                        q.text = removeBoldUnderlinePairsHtml20260612B(editable.innerHTML || q.text || '');
+                        if (editable.innerHTML !== q.text) setEditableHtmlPreserveCaret(editable, q.text);
+                    }
+                    autoSave();
+                };
+            }
+
+            window.normalizeBrokenFuriganaRubyHtml20260612B = normalizeBrokenFuriganaRubyHtml20260612B;
+            window.removeBoldUnderlinePairsHtml20260612B = removeBoldUnderlinePairsHtml20260612B;
+        })();
+
+
+        // ==========================================
+        // PATCH 2026-06-12C: DỌN KHOẢNG TRẮNG RÁC + FURIGANA AUTO-SCAN + RESET FORMAT KHI XÓA HẾT
+        // Mục tiêu:
+        // - Dọn ký tự trắng vô hình/siêu mảnh giữa chữ Nhật: 努力    ば -> 努力ば.
+        // - Không đụng token Space của hệ thống: ＿＿＿ / （　　　） / ★.
+        // - Khi đang bật phun ひらがな, Kanji mới gõ/dán tự được bọc ruby ngay trong ô đang sửa.
+        // - Ruby Kanji bị tách rồi đứng sát nhau sẽ tự gộp lại thành một cặp ruby.
+        // - Ctrl+A rồi Backspace/Delete sẽ xóa sạch nội dung và reset trạng thái gõ về text thường.
+        // ==========================================
+        (function installCleanSpaceAutoFuriganaClearFormatPatch20260612C(){
+            if (window.__cleanSpaceAutoFuriganaClearFormatPatch20260612CInstalled) return;
+            window.__cleanSpaceAutoFuriganaClearFormatPatch20260612CInstalled = true;
+
+            const JP_CHAR_RE_20260612C = /[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF々〆ヶ]/;
+            const JP_SPACE_RE_20260612C = /[\u00A0\u1680\u180E\u2000-\u200D\u2028\u2029\u202F\u205F\u3000\uFEFF \t\r\n]+/g;
+            const RUBY_SELECTOR_20260612C = 'ruby.furigana-ruby, ruby';
+
+            function isAutoFuriganaModeOn20260612C() {
+                try { return !!isFuriganaMode; } catch (_) { return false; }
+            }
+
+            function isProtectedFuriganaCleanContext20260612C(node) {
+                const el = node && (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement);
+                return !!(el && el.closest && el.closest('script, style, textarea, select, option, rt, rp, .question-fixed-token, .passage-question-blank, .section-title-question-blank, .rte-table-drag-handle, .rte-resize-handle'));
+            }
+
+            function compactJapaneseInlineSpacesText20260612C(value) {
+                const jp = '[\\u3040-\\u30FF\\u3400-\\u4DBF\\u4E00-\\u9FFF\\uF900-\\uFAFF々〆ヶ]';
+                const spaces = '[\\u00A0\\u1680\\u180E\\u2000-\\u200D\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF \\t\\r\\n]+';
+                return String(value || '')
+                    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+                    .replace(new RegExp('(' + jp + ')' + spaces + '(?=' + jp + ')', 'g'), '$1');
+            }
+
+            function getRubyBase20260612C(ruby) {
+                if (!ruby) return '';
+                try {
+                    if (typeof getRubyBaseText === 'function') return (getRubyBaseText(ruby) || '').trim();
+                } catch (_) {}
+                const clone = ruby.cloneNode(true);
+                clone.querySelectorAll('rt,rp').forEach(el => el.remove());
+                return (ruby.getAttribute('data-base') || clone.textContent || '').trim();
+            }
+
+            function getRubyReading20260612C(ruby) {
+                if (!ruby) return '';
+                try {
+                    if (typeof getRubyReadingText === 'function') return (getRubyReadingText(ruby) || '').trim();
+                } catch (_) {}
+                const rt = ruby.querySelector('rt');
+                return (ruby.getAttribute('data-reading') || (rt ? rt.textContent : '') || '').trim();
+            }
+
+            function nodeStartsWithJapanese20260612C(node) {
+                if (!node || isProtectedFuriganaCleanContext20260612C(node)) return false;
+                if (node.nodeType === Node.TEXT_NODE) {
+                    const t = compactJapaneseInlineSpacesText20260612C(node.nodeValue || '').replace(JP_SPACE_RE_20260612C, '');
+                    return JP_CHAR_RE_20260612C.test(t.charAt(0) || '');
+                }
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                    if (node.matches && node.matches(RUBY_SELECTOR_20260612C)) return JP_CHAR_RE_20260612C.test((getRubyBase20260612C(node).charAt(0) || ''));
+                    if (node.matches && node.matches('.question-fixed-token, .passage-question-blank, .section-title-question-blank, br, img, table')) return false;
+                    for (const child of Array.from(node.childNodes || [])) {
+                        if (nodeStartsWithJapanese20260612C(child)) return true;
+                        if ((child.textContent || '').trim()) break;
+                    }
+                }
+                return false;
+            }
+
+            function nodeEndsWithJapanese20260612C(node) {
+                if (!node || isProtectedFuriganaCleanContext20260612C(node)) return false;
+                if (node.nodeType === Node.TEXT_NODE) {
+                    const t = compactJapaneseInlineSpacesText20260612C(node.nodeValue || '').replace(JP_SPACE_RE_20260612C, '');
+                    return JP_CHAR_RE_20260612C.test(t.charAt(t.length - 1) || '');
+                }
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                    if (node.matches && node.matches(RUBY_SELECTOR_20260612C)) {
+                        const base = getRubyBase20260612C(node);
+                        return JP_CHAR_RE_20260612C.test(base.charAt(base.length - 1) || '');
+                    }
+                    if (node.matches && node.matches('.question-fixed-token, .passage-question-blank, .section-title-question-blank, br, img, table')) return false;
+                    const children = Array.from(node.childNodes || []).reverse();
+                    for (const child of children) {
+                        if (nodeEndsWithJapanese20260612C(child)) return true;
+                        if ((child.textContent || '').trim()) break;
+                    }
+                }
+                return false;
+            }
+
+            function previousMeaningfulSibling20260612C(node) {
+                let cur = node ? node.previousSibling : null;
+                while (cur) {
+                    if (cur.nodeType === Node.TEXT_NODE && !(cur.nodeValue || '').replace(JP_SPACE_RE_20260612C, '')) {
+                        cur = cur.previousSibling;
+                        continue;
+                    }
+                    return cur;
+                }
+                return null;
+            }
+
+            function nextMeaningfulSibling20260612C(node) {
+                let cur = node ? node.nextSibling : null;
+                while (cur) {
+                    if (cur.nodeType === Node.TEXT_NODE && !(cur.nodeValue || '').replace(JP_SPACE_RE_20260612C, '')) {
+                        cur = cur.nextSibling;
+                        continue;
+                    }
+                    return cur;
+                }
+                return null;
+            }
+
+            function cleanJapaneseSpacingInHolder20260612C(holder) {
+                if (!holder || !holder.querySelectorAll) return false;
+                let changed = false;
+
+                const walker = document.createTreeWalker(holder, NodeFilter.SHOW_TEXT, {
+                    acceptNode(node) {
+                        if (!node.nodeValue || isProtectedFuriganaCleanContext20260612C(node)) return NodeFilter.FILTER_REJECT;
+                        return /[\u00A0\u1680\u180E\u2000-\u200D\u2028\u2029\u202F\u205F\u3000\uFEFF]/.test(node.nodeValue) || /[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF々〆ヶ][ \t\r\n　]+[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF々〆ヶ]/.test(node.nodeValue)
+                            ? NodeFilter.FILTER_ACCEPT
+                            : NodeFilter.FILTER_REJECT;
+                    }
+                });
+                const nodes = [];
+                while (walker.nextNode()) nodes.push(walker.currentNode);
+                nodes.forEach(node => {
+                    const before = node.nodeValue || '';
+                    const after = compactJapaneseInlineSpacesText20260612C(before);
+                    if (after !== before) {
+                        node.nodeValue = after;
+                        changed = true;
+                    }
+                });
+
+                const parents = [holder, ...Array.from(holder.querySelectorAll('*'))].filter(el => !isProtectedFuriganaCleanContext20260612C(el));
+                parents.forEach(parent => {
+                    Array.from(parent.childNodes || []).forEach(node => {
+                        if (!node || node.nodeType !== Node.TEXT_NODE || !node.nodeValue) return;
+                        let value = node.nodeValue;
+                        const prev = previousMeaningfulSibling20260612C(node);
+                        const next = nextMeaningfulSibling20260612C(node);
+
+                        if (!value.replace(JP_SPACE_RE_20260612C, '') && nodeEndsWithJapanese20260612C(prev) && nodeStartsWithJapanese20260612C(next)) {
+                            node.remove();
+                            changed = true;
+                            return;
+                        }
+
+                        const before = value;
+                        if (nodeEndsWithJapanese20260612C(prev) && JP_CHAR_RE_20260612C.test(value.replace(JP_SPACE_RE_20260612C, '').charAt(0) || '')) {
+                            value = value.replace(/^[\u00A0\u1680\u180E\u2000-\u200D\u2028\u2029\u202F\u205F\u3000\uFEFF \t\r\n]+/, '');
+                        }
+                        if (nodeStartsWithJapanese20260612C(next) && JP_CHAR_RE_20260612C.test(value.replace(JP_SPACE_RE_20260612C, '').slice(-1) || '')) {
+                            value = value.replace(/[\u00A0\u1680\u180E\u2000-\u200D\u2028\u2029\u202F\u205F\u3000\uFEFF \t\r\n]+$/, '');
+                        }
+                        if (value !== before) {
+                            node.nodeValue = value;
+                            changed = true;
+                        }
+                    });
+                });
+
+                return changed;
+            }
+
+            function setRubyContent20260612C(ruby, base, reading) {
+                if (!ruby || !base) return;
+                ruby.classList.add('furigana-ruby');
+                ruby.setAttribute('data-base', base);
+                ruby.setAttribute('data-reading', reading || '');
+                ruby.setAttribute('contenteditable', 'false');
+                while (ruby.firstChild) ruby.removeChild(ruby.firstChild);
+                ruby.appendChild(document.createTextNode(base));
+                const rt = document.createElement('rt');
+                rt.textContent = reading || '';
+                ruby.appendChild(rt);
+            }
+
+            function canMergeRubySeparator20260612C(node, leftReading, rightReading) {
+                if (!node) return { ok: true, remove: false };
+                if (node.nodeType !== Node.TEXT_NODE) return null;
+                const raw = node.nodeValue || '';
+                const compact = raw.replace(JP_SPACE_RE_20260612C, '');
+                if (!compact) return { ok: true, remove: true };
+                if (/^[\u3040-\u30FFー・･]+$/.test(compact) && compact.length <= 4) {
+                    if ((rightReading && rightReading.startsWith(compact)) || (leftReading && leftReading.endsWith(compact)) || (leftReading && rightReading && (leftReading + rightReading).includes(compact))) {
+                        return { ok: true, remove: true };
+                    }
+                }
+                return null;
+            }
+
+            function mergeAdjacentRubyInHolder20260612C(holder) {
+                if (!holder || !holder.querySelectorAll) return false;
+                try { if (typeof normalizeExistingFuriganaRuby === 'function') normalizeExistingFuriganaRuby(holder); } catch (_) {}
+                let changed = false;
+                const kanjiOnly = /^[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF々〆ヶ]+$/;
+
+                for (let pass = 0; pass < 8; pass++) {
+                    let passChanged = false;
+                    const parents = [holder, ...Array.from(holder.querySelectorAll('*'))];
+                    parents.forEach(parent => {
+                        let node = parent.firstChild;
+                        while (node) {
+                            if (!(node.nodeType === Node.ELEMENT_NODE && node.tagName === 'RUBY')) {
+                                node = node.nextSibling;
+                                continue;
+                            }
+                            const leftRuby = node;
+                            const sepNode = leftRuby.nextSibling;
+                            const directRight = sepNode && sepNode.nodeType === Node.ELEMENT_NODE && sepNode.tagName === 'RUBY' ? sepNode : null;
+                            const rightRuby = directRight || (sepNode && sepNode.nextSibling && sepNode.nextSibling.nodeType === Node.ELEMENT_NODE && sepNode.nextSibling.tagName === 'RUBY' ? sepNode.nextSibling : null);
+                            if (!rightRuby) {
+                                node = node.nextSibling;
+                                continue;
+                            }
+                            const leftBase = getRubyBase20260612C(leftRuby);
+                            const rightBase = getRubyBase20260612C(rightRuby);
+                            if (!kanjiOnly.test(leftBase) || !kanjiOnly.test(rightBase)) {
+                                node = node.nextSibling;
+                                continue;
+                            }
+                            const leftReading = getRubyReading20260612C(leftRuby);
+                            const rightReading = getRubyReading20260612C(rightRuby);
+                            const sep = directRight ? { ok: true, remove: false } : canMergeRubySeparator20260612C(sepNode, leftReading, rightReading);
+                            if (!sep || !sep.ok) {
+                                node = node.nextSibling;
+                                continue;
+                            }
+                            setRubyContent20260612C(leftRuby, leftBase + rightBase, (leftReading || '') + (rightReading || ''));
+                            if (sep.remove && sepNode && sepNode.parentNode) sepNode.remove();
+                            if (rightRuby && rightRuby.parentNode) rightRuby.remove();
+                            passChanged = true;
+                            changed = true;
+                        }
+                    });
+                    if (!passChanged) break;
+                }
+                return changed;
+            }
+
+            function normalizeAutoFuriganaHtml20260612C(html, options = {}) {
+                const holder = document.createElement('div');
+                const rich = options.rich === true;
+                const questionTitle = options.questionTitle === true;
+                let source = String(html || '');
+                if (!rich) {
+                    try { source = cleanEditableHtml(source, options.placeholder || ''); } catch (_) {}
+                }
+                holder.innerHTML = source;
+                cleanJapaneseSpacingInHolder20260612C(holder);
+                let out = holder.innerHTML;
+                if (isAutoFuriganaModeOn20260612C() && typeof wrapKanjiHtmlWithFurigana === 'function') {
+                    out = wrapKanjiHtmlWithFurigana(out);
+                }
+                const holder2 = document.createElement('div');
+                holder2.innerHTML = out;
+                cleanJapaneseSpacingInHolder20260612C(holder2);
+                mergeAdjacentRubyInHolder20260612C(holder2);
+                if (typeof normalizeAdjacentInlineFormatWrappers === 'function') {
+                    try { normalizeAdjacentInlineFormatWrappers(holder2); } catch (_) {}
+                }
+                out = holder2.innerHTML;
+                if (questionTitle && typeof normalizeQuestionTokens === 'function') {
+                    out = normalizeQuestionTokens(out);
+                }
+                return out;
+            }
+
+            const previousCleanHtmlGarbage20260612C = typeof cleanHtmlGarbage === 'function' ? cleanHtmlGarbage : null;
+            if (previousCleanHtmlGarbage20260612C) {
+                cleanHtmlGarbage = function(html, options = {}) {
+                    const out = previousCleanHtmlGarbage20260612C.apply(this, arguments);
+                    const holder = document.createElement('div');
+                    holder.innerHTML = out || '';
+                    cleanJapaneseSpacingInHolder20260612C(holder);
+                    mergeAdjacentRubyInHolder20260612C(holder);
+                    return holder.innerHTML;
+                };
+                window.cleanHtmlGarbage = cleanHtmlGarbage;
+            }
+
+            const previousPlainTextDeepClean20260612C = typeof plainTextDeepClean === 'function' ? plainTextDeepClean : null;
+            if (previousPlainTextDeepClean20260612C) {
+                plainTextDeepClean = function(value) {
+                    return compactJapaneseInlineSpacesText20260612C(previousPlainTextDeepClean20260612C.apply(this, arguments));
+                };
+                window.plainTextDeepClean = plainTextDeepClean;
+            }
+
+            let autoSyncGuard20260612C = false;
+            const previousSyncInputData20260612C = typeof syncInputData === 'function' ? syncInputData : null;
+            if (previousSyncInputData20260612C) {
+                syncInputData = function(input) {
+                    previousSyncInputData20260612C.apply(this, arguments);
+                    if (autoSyncGuard20260612C || !input || !input.isContentEditable) return;
+                    const isQuestionTitle = input.classList && input.classList.contains('question-title');
+                    const isOption = input.classList && input.classList.contains('input-opt');
+                    if (!isQuestionTitle && !isOption) return;
+                    if (!isAutoFuriganaModeOn20260612C() && !/[\u00A0\u1680\u180E\u2000-\u200D\u2028\u2029\u202F\u205F\u3000\uFEFF]/.test(input.innerHTML || '')) return;
+
+                    autoSyncGuard20260612C = true;
+                    try {
+                        const normalized = normalizeAutoFuriganaHtml20260612C(input.innerHTML || '', {
+                            questionTitle: isQuestionTitle,
+                            placeholder: input.getAttribute('placeholder') || ''
+                        });
+                        if (normalized !== input.innerHTML) {
+                            setEditableHtmlPreserveCaret(input, normalized);
+                            previousSyncInputData20260612C.call(this, input);
+                        }
+                    } finally {
+                        autoSyncGuard20260612C = false;
+                    }
+                };
+                window.syncInputData = syncInputData;
+            }
+
+            const previousHandleInlineTitleInput20260612C = typeof handleInlineTitleInput === 'function' ? handleInlineTitleInput : null;
+            if (previousHandleInlineTitleInput20260612C) {
+                handleInlineTitleInput = function(input, sIdx) {
+                    if (input && input.isContentEditable && (isAutoFuriganaModeOn20260612C() || /[\u00A0\u1680\u180E\u2000-\u200D\u2028\u2029\u202F\u205F\u3000\uFEFF]/.test(input.innerHTML || ''))) {
+                        const normalized = normalizeAutoFuriganaHtml20260612C(input.innerHTML || '', { placeholder: input.getAttribute('placeholder') || '' });
+                        if (normalized !== input.innerHTML) setEditableHtmlPreserveCaret(input, normalized);
+                    }
+                    previousHandleInlineTitleInput20260612C.apply(this, arguments);
+                    if (input && input.isContentEditable && examSections?.[sIdx]) {
+                        const normalizedAfter = normalizeAutoFuriganaHtml20260612C(input.innerHTML || '', { placeholder: input.getAttribute('placeholder') || '' });
+                        if (normalizedAfter !== input.innerHTML) {
+                            setEditableHtmlPreserveCaret(input, normalizedAfter);
+                            examSections[sIdx].title = cleanEditableHtml(normalizedAfter, input.getAttribute('placeholder') || '');
+                            try { autoSave(); renderTabs(); renderMatrixSidebar(); } catch (_) {}
+                        }
+                    }
+                };
+                window.handleInlineTitleInput = handleInlineTitleInput;
+            }
+
+            const previousSyncPassage20260612C = typeof syncPassage === 'function' ? syncPassage : null;
+            if (previousSyncPassage20260612C) {
+                syncPassage = function(gIdx) {
+                    const editor = document.getElementById(`dokkai-passage-${gIdx}`);
+                    if (editor && (isAutoFuriganaModeOn20260612C() || /[\u00A0\u1680\u180E\u2000-\u200D\u2028\u2029\u202F\u205F\u3000\uFEFF]/.test(editor.innerHTML || ''))) {
+                        const normalized = normalizeAutoFuriganaHtml20260612C(editor.innerHTML || '', { rich: true });
+                        if (normalized !== editor.innerHTML) setEditableHtmlPreserveCaret(editor, normalized);
+                    }
+                    return previousSyncPassage20260612C.apply(this, arguments);
+                };
+                window.syncPassage = syncPassage;
+            }
+
+            function editableSelectionIsWhole20260612C(editable) {
+                const sel = window.getSelection();
+                if (!editable || !sel || sel.rangeCount === 0) return false;
+                const range = sel.getRangeAt(0);
+                if (range.collapsed) return false;
+                if (!editable.contains(range.commonAncestorContainer) && range.commonAncestorContainer !== editable) return false;
+                const all = document.createRange();
+                all.selectNodeContents(editable);
+                try {
+                    return range.compareBoundaryPoints(Range.START_TO_START, all) <= 0 && range.compareBoundaryPoints(Range.END_TO_END, all) >= 0;
+                } catch (_) {
+                    return (range.toString() || '').length >= (editable.textContent || '').length;
+                }
+            }
+
+            function resetTypingFormatState20260612C() {
+                try {
+                    ['bold', 'underline', 'italic'].forEach(cmd => {
+                        try {
+                            if (document.queryCommandState && document.queryCommandState(cmd)) {
+                                document.execCommand(cmd, false, null);
+                            }
+                        } catch (_) {}
+                    });
+                    try { document.execCommand('removeFormat', false, null); } catch (_) {}
+                } catch (_) {}
+            }
+
+            function clearEditableAndStoredData20260612C(editable) {
+                if (!editable) return;
+                editable.innerHTML = '';
+                resetTypingFormatState20260612C();
+                try { placeCaretAtEndEditable(editable); } catch (_) {}
+
+                const gIdx = parseInt(editable.getAttribute('data-g-idx'), 10);
+                const qIdx = parseInt(editable.getAttribute('data-q-idx'), 10);
+                const sIdx = typeof getSectionIndexFromEditable === 'function' ? getSectionIndexFromEditable(editable) : activeSectionIndex;
+                const q = Number.isInteger(gIdx) && Number.isInteger(qIdx) ? examSections?.[sIdx]?.groups?.[gIdx]?.questions?.[qIdx] : null;
+
+                if (editable.classList.contains('question-title') && q) {
+                    q.text = '';
+                    q.underline = '';
+                    q.underlineOccurrence = 0;
+                    q.starPosition = '';
+                    const block = editable.closest('.question-block');
+                    const underlineInput = block?.querySelector?.('.question-underline');
+                    const starInput = block?.querySelector?.('.question-star');
+                    if (underlineInput) underlineInput.value = '';
+                    if (starInput) starInput.value = '';
+                } else if (editable.classList.contains('input-opt') && q) {
+                    const oIdx = parseInt(editable.getAttribute('data-o-idx'), 10);
+                    if (Array.isArray(q.options) && Number.isInteger(oIdx)) q.options[oIdx] = '';
+                } else if (editable.classList.contains('question-explain') && q) {
+                    q.explanation = '';
+                } else if (editable.classList.contains('question-note') && q) {
+                    q.note = '';
+                } else if (editable.classList.contains('section-title-editable')) {
+                    const titleIdx = parseInt(editable.getAttribute('data-s-idx'), 10);
+                    if (examSections?.[titleIdx]) {
+                        examSections[titleIdx].title = '';
+                        examSections[titleIdx].tabName = '問題';
+                    }
+                } else if (editable.classList.contains('dokkai-content')) {
+                    const pgIdx = parseInt(editable.getAttribute('data-g-idx'), 10);
+                    const group = examSections?.[activeSectionIndex]?.groups?.[pgIdx];
+                    if (group) group.passageHTML = '';
+                } else if (previousSyncInputData20260612C && (editable.classList.contains('bulk-exp-input') || editable.classList.contains('bulk-note-input'))) {
+                    // Modal hàng loạt lưu theo DOM khi bấm áp dụng, nên chỉ cần xóa DOM và reset format.
+                } else if (previousSyncInputData20260612C) {
+                    previousSyncInputData20260612C(editable);
+                }
+                try { autoSave(); } catch (_) {}
+            }
+
+            document.addEventListener('keydown', function(event) {
+                if (event.isComposing) return;
+                const key = String(event.key || '').toLowerCase();
+                if (key !== 'backspace' && key !== 'delete') return;
+                const editable = event.target?.closest?.('[contenteditable="true"]');
+                if (!editable || editable.closest('#furigana-popover')) return;
+                if (!editableSelectionIsWhole20260612C(editable)) return;
+                event.preventDefault();
+                event.stopPropagation();
+                if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+                clearEditableAndStoredData20260612C(editable);
+            }, true);
+
+            window.cleanJapaneseSpacingInHolder20260612C = cleanJapaneseSpacingInHolder20260612C;
+            window.normalizeAutoFuriganaHtml20260612C = normalizeAutoFuriganaHtml20260612C;
+            window.mergeAdjacentRubyInHolder20260612C = mergeAdjacentRubyInHolder20260612C;
+        })();
+
+
+        // ==========================================
+        // PATCH 2026-06-12: SHARE LINK KHÁCH KHÔNG LƯU ĐỀ XUỐNG MÁY
+        // Mục tiêu:
+        // - Admin/trình duyệt đã được trust vẫn tự lưu bình thường.
+        // - Máy người mở link share chỉ giữ đề trong RAM của tab hiện tại.
+        // - Không ghi đề đã giải mã vào localStorage examStorageJLPT_v8.
+        // - Khi link bị xóa/tắt/cloud lỗi: tự quét bản đề share cũ khỏi localStorage.
+        // Lưu ý kỹ thuật: web tĩnh phía client không thể chặn tuyệt đối chụp màn hình/copy thủ công,
+        // nhưng patch này chặn đường tự lưu đề của hệ thống trên trình duyệt khách.
+        // ==========================================
+        (function installNoVisitorLocalSavePatch20260612() {
+            if (window.__NO_VISITOR_LOCAL_SAVE_PATCH_20260612__) return;
+            window.__NO_VISITOR_LOCAL_SAVE_PATCH_20260612__ = true;
+
+            const PATCH_TAG = 'NO_VISITOR_LOCAL_SAVE_20260612';
+            const EXAM_STORAGE_KEYS = ['examStorageJLPT_v8', 'examStorageJLPT'];
+            const STORAGE_KEYS_BLOCKED_FOR_VISITOR = [
+                'examStorageJLPT_v8',
+                'examStorageJLPT',
+                'jlpt_cloud_last_exam_id_v1',
+                'jlpt_cloud_firebase_config_v1'
+            ];
+            const STORAGE_PREFIXES_BLOCKED_FOR_VISITOR = [
+                'jlpt_cloud_view_password_v1_',
+                'jlpt_cloud_edit_hash_',
+                'jlpt_cloud_admin_hash_',
+                'jlpt_cloud_panel_state_',
+                'jlpt_cloud_panel_state_index',
+                'jlpt_cloud_plain_password_history_'
+            ];
+
+            function noLocalIsShareVisitor() {
+                try {
+                    return typeof cloudIsShareVisitor === 'function' && cloudIsShareVisitor();
+                } catch (_) {
+                    return false;
+                }
+            }
+
+            function noLocalRoomIds() {
+                const ids = [];
+                try { if (cloudShareId) ids.push(String(cloudShareId)); } catch (_) {}
+                try { if (currentExamId) ids.push(String(currentExamId)); } catch (_) {}
+                try { if (typeof CLOUD_ACCESS_INITIAL_ROOM_ID !== 'undefined' && CLOUD_ACCESS_INITIAL_ROOM_ID) ids.push(String(CLOUD_ACCESS_INITIAL_ROOM_ID)); } catch (_) {}
+                try {
+                    if (typeof cloudGetExamIdFromUrl === 'function') {
+                        const urlId = cloudGetExamIdFromUrl();
+                        if (urlId) ids.push(String(urlId));
+                    }
+                } catch (_) {}
+                try {
+                    if (typeof cloudSanitizeExamId === 'function') {
+                        return Array.from(new Set(ids.map(id => cloudSanitizeExamId(id)).filter(Boolean)));
+                    }
+                } catch (_) {}
+                return Array.from(new Set(ids.map(id => String(id || '').trim()).filter(Boolean)));
+            }
+
+            function noLocalStorageKeyBlocked(key) {
+                const k = String(key || '');
+                if (!noLocalIsShareVisitor()) return false;
+                if (STORAGE_KEYS_BLOCKED_FOR_VISITOR.includes(k)) return true;
+                return STORAGE_PREFIXES_BLOCKED_FOR_VISITOR.some(prefix => k.startsWith(prefix));
+            }
+
+            function noLocalSafeParseJson(raw, fallback) {
+                try { return JSON.parse(raw); } catch (_) { return fallback; }
+            }
+
+            function noLocalPurgeExamStorageForVisitor(reason = '') {
+                if (!noLocalIsShareVisitor()) return;
+                const ids = noLocalRoomIds();
+                const idSet = new Set(ids);
+                const shouldDropExam = (item) => {
+                    if (!item || typeof item !== 'object') return false;
+                    const itemId = String(item.id || '');
+                    const panelRoom = String(item.cloudPanelState && item.cloudPanelState.cloudShareId || '');
+                    return idSet.has(itemId) || idSet.has(panelRoom);
+                };
+
+                EXAM_STORAGE_KEYS.forEach(key => {
+                    try {
+                        const raw = localStorage.getItem(key);
+                        if (!raw) return;
+                        const arr = noLocalSafeParseJson(raw, null);
+                        if (!Array.isArray(arr)) {
+                            localStorage.removeItem(key);
+                            return;
+                        }
+                        const filtered = arr.filter(item => !shouldDropExam(item));
+                        if (filtered.length !== arr.length) {
+                            if (filtered.length) Storage.prototype.setItem.call(localStorage, key, JSON.stringify(filtered));
+                            else localStorage.removeItem(key);
+                        }
+                    } catch (_) {
+                        try { localStorage.removeItem(key); } catch (_) {}
+                    }
+                });
+
+                try {
+                    const prefixes = STORAGE_PREFIXES_BLOCKED_FOR_VISITOR.concat([
+                        'jlpt_cloud_last_exam_id_v1',
+                        'jlpt_cloud_firebase_config_v1'
+                    ]);
+                    Object.keys(localStorage).forEach(k => {
+                        if (STORAGE_KEYS_BLOCKED_FOR_VISITOR.includes(k) || prefixes.some(prefix => k.startsWith(prefix))) {
+                            localStorage.removeItem(k);
+                        }
+                    });
+                } catch (_) {}
+
+                try {
+                    if (typeof renderStorageList === 'function') renderStorageList();
+                } catch (_) {}
+
+                try {
+                    if (reason && typeof cloudSetStatus === 'function') {
+                        cloudSetStatus('🧹 Đã xóa bản lưu tạm của link share khỏi máy khách: ' + reason, 'error');
+                    }
+                } catch (_) {}
+            }
+
+            // Chặn mọi lần ghi dữ liệu đề/cache cloud xuống localStorage khi đang là máy khách.
+            try {
+                const nativeSetItem = Storage.prototype.setItem;
+                if (!Storage.prototype.__jlptNoVisitorLocalSaveWrapped20260612) {
+                    Storage.prototype.setItem = function(key, value) {
+                        if (this === localStorage && noLocalStorageKeyBlocked(key)) {
+                            return;
+                        }
+                        return nativeSetItem.apply(this, arguments);
+                    };
+                    Storage.prototype.__jlptNoVisitorLocalSaveWrapped20260612 = true;
+                }
+            } catch (_) {}
+
+            // Máy khách: forceAutoSave chỉ dựng snapshot để đẩy cloud nếu có quyền sửa, tuyệt đối không ghi examStorageJLPT_v8.
+            if (typeof forceAutoSave === 'function' && !forceAutoSave.__noVisitorLocalSaveWrapped20260612) {
+                const originalForceAutoSave = forceAutoSave;
+                forceAutoSave = function() {
+                    if (!noLocalIsShareVisitor()) {
+                        return originalForceAutoSave.apply(this, arguments);
+                    }
+                    if (!currentExamId) currentExamId = (typeof cloudShareId !== 'undefined' && cloudShareId) || (typeof generateId === 'function' ? generateId() : String(Date.now()));
+                    let filename = 'De_Thi_Chia_Se_Tam_Thoi';
+                    try {
+                        const el = document.getElementById('filename-field');
+                        filename = (el && el.value && el.value.trim()) || filename;
+                    } catch (_) {}
+                    try { if (typeof syncExamTitleBar === 'function') syncExamTitleBar(); } catch (_) {}
+
+                    const examData = {
+                        id: currentExamId,
+                        filename,
+                        date: new Date().toLocaleString('vi-VN'),
+                        timestamp_ms: Date.now(),
+                        data: examSections,
+                        mergedSources: Array.isArray(mergedExamIds) ? mergedExamIds : []
+                    };
+
+                    try { noLocalPurgeExamStorageForVisitor('không cho link share lưu đề trên trình duyệt khách'); } catch (_) {}
+                    try { if (typeof renderStorageList === 'function') renderStorageList(); } catch (_) {}
+                    try {
+                        if (typeof cloudQueueSave === 'function' && !cloudApplyingRemote) cloudQueueSave(examData);
+                    } catch (_) {}
+                    try {
+                        if (!cloudShareId || !cloudRef) cloudSetStatus('🔒 Phiên link khách: đề chỉ giữ tạm trong tab này, không lưu xuống máy.', 'error');
+                    } catch (_) {}
+                    return examData;
+                };
+                forceAutoSave.__noVisitorLocalSaveWrapped20260612 = true;
+                window.forceAutoSave = forceAutoSave;
+            }
+
+            // Danh sách đề bên khách không đọc kho cục bộ nữa.
+            if (typeof renderStorageList === 'function' && !renderStorageList.__noVisitorLocalSaveWrapped20260612) {
+                const originalRenderStorageList = renderStorageList;
+                renderStorageList = function() {
+                    if (!noLocalIsShareVisitor()) return originalRenderStorageList.apply(this, arguments);
+                    const storageList = document.getElementById('storage-list');
+                    if (storageList) {
+                        storageList.innerHTML = '<li style="color:#64748b;text-align:center;padding:15px;font-size:13px;font-weight:800;">🔒 Link share không lưu đề vào máy khách</li>';
+                    }
+                };
+                renderStorageList.__noVisitorLocalSaveWrapped20260612 = true;
+                window.renderStorageList = renderStorageList;
+            }
+
+            // Không cho máy khách mở lại/gộp từ kho local trong giao diện share.
+            if (typeof loadExamDataById === 'function' && !loadExamDataById.__noVisitorLocalSaveWrapped20260612) {
+                const originalLoadExamDataById = loadExamDataById;
+                loadExamDataById = function(id) {
+                    if (noLocalIsShareVisitor()) {
+                        try { cloudSetStatus('🔒 Link share không cho mở đề từ kho lưu máy khách.', 'error'); } catch (_) {}
+                        return;
+                    }
+                    return originalLoadExamDataById.apply(this, arguments);
+                };
+                loadExamDataById.__noVisitorLocalSaveWrapped20260612 = true;
+                window.loadExamDataById = loadExamDataById;
+            }
+
+            // Khi link bị xóa/tắt hoặc cloud không kiểm tra được, quét sạch bản share cũ trên máy khách.
+            if (typeof cloudShowNotFound === 'function' && !cloudShowNotFound.__noVisitorLocalSaveWrapped20260612) {
+                const originalCloudShowNotFound = cloudShowNotFound;
+                cloudShowNotFound = function(message) {
+                    try { noLocalPurgeExamStorageForVisitor('link đã tắt/xóa/không tồn tại'); } catch (_) {}
+                    return originalCloudShowNotFound.apply(this, arguments);
+                };
+                cloudShowNotFound.__noVisitorLocalSaveWrapped20260612 = true;
+                window.cloudShowNotFound = cloudShowNotFound;
+            }
+
+            if (typeof cloudShowShareVisitorConnectError === 'function' && !cloudShowShareVisitorConnectError.__noVisitorLocalSaveWrapped20260612) {
+                const originalCloudShowShareVisitorConnectError = cloudShowShareVisitorConnectError;
+                cloudShowShareVisitorConnectError = function(err, roomId) {
+                    try { noLocalPurgeExamStorageForVisitor('cloud lỗi hoặc chưa kiểm tra được link'); } catch (_) {}
+                    return originalCloudShowShareVisitorConnectError.apply(this, arguments);
+                };
+                cloudShowShareVisitorConnectError.__noVisitorLocalSaveWrapped20260612 = true;
+                window.cloudShowShareVisitorConnectError = cloudShowShareVisitorConnectError;
+            }
+
+            // Không cache mật khẩu mở/sửa/admin trên máy khách. Admin trusted vẫn cache bình thường.
+            if (typeof cloudSetCachedViewPassword === 'function' && !cloudSetCachedViewPassword.__noVisitorLocalSaveWrapped20260612) {
+                const originalCloudSetCachedViewPassword = cloudSetCachedViewPassword;
+                cloudSetCachedViewPassword = function() {
+                    if (noLocalIsShareVisitor()) return;
+                    return originalCloudSetCachedViewPassword.apply(this, arguments);
+                };
+                cloudSetCachedViewPassword.__noVisitorLocalSaveWrapped20260612 = true;
+                window.cloudSetCachedViewPassword = cloudSetCachedViewPassword;
+            }
+            if (typeof cloudSetCachedEditHash === 'function' && !cloudSetCachedEditHash.__noVisitorLocalSaveWrapped20260612) {
+                const originalCloudSetCachedEditHash = cloudSetCachedEditHash;
+                cloudSetCachedEditHash = function() {
+                    if (noLocalIsShareVisitor()) return;
+                    return originalCloudSetCachedEditHash.apply(this, arguments);
+                };
+                cloudSetCachedEditHash.__noVisitorLocalSaveWrapped20260612 = true;
+                window.cloudSetCachedEditHash = cloudSetCachedEditHash;
+            }
+            if (typeof cloudSetCachedAdminHash === 'function' && !cloudSetCachedAdminHash.__noVisitorLocalSaveWrapped20260612) {
+                const originalCloudSetCachedAdminHash = cloudSetCachedAdminHash;
+                cloudSetCachedAdminHash = function() {
+                    if (noLocalIsShareVisitor()) return;
+                    return originalCloudSetCachedAdminHash.apply(this, arguments);
+                };
+                cloudSetCachedAdminHash.__noVisitorLocalSaveWrapped20260612 = true;
+                window.cloudSetCachedAdminHash = cloudSetCachedAdminHash;
+            }
+
+            // Chặn phím tắt lưu/in phổ biến ở link khách. Không ảnh hưởng admin.
+            document.addEventListener('keydown', function(event) {
+                if (!noLocalIsShareVisitor()) return;
+                const key = String(event.key || '').toLowerCase();
+                const ctrlOrMeta = event.ctrlKey || event.metaKey;
+                if (ctrlOrMeta && ['s', 'p'].includes(key)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    try { cloudSetStatus('🔒 Link share không cho lưu/in đề trên máy khách.', 'error'); } catch (_) {}
+                }
+            }, true);
+
+            try {
+                const originalPrint = window.print;
+                window.print = function() {
+                    if (noLocalIsShareVisitor()) {
+                        try { cloudSetStatus('🔒 Link share không cho in đề trên máy khách.', 'error'); } catch (_) {}
+                        return;
+                    }
+                    return originalPrint.apply(window, arguments);
+                };
+            } catch (_) {}
+
+            // Dọn ngay nếu tab hiện tại là link người truy cập.
+            try {
+                setTimeout(() => {
+                    if (noLocalIsShareVisitor()) {
+                        noLocalPurgeExamStorageForVisitor('khởi động chế độ không lưu cho máy khách');
+                        if (typeof renderStorageList === 'function') renderStorageList();
+                    }
+                }, 0);
+            } catch (_) {}
+
+            window.noLocalPurgeExamStorageForVisitor20260612 = noLocalPurgeExamStorageForVisitor;
+            window.noVisitorLocalSavePatchTag20260612 = PATCH_TAG;
+        })();
+
+
         // ==========================================
     </script>
 </body>
