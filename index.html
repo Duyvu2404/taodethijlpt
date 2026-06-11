@@ -19079,6 +19079,114 @@ Từ lần sau hệ thống sẽ nhớ link này:`,
 
 
         // ==========================================
+        // PATCH 2026-06-12D: GV giữ đậm A/B/C/D + Word Ruby chuẩn Phonetic Guide
+        // - Đáp án đúng trong file GV: chữ Nhật/từ đáp án màu đỏ không bị in đậm.
+        // - Riêng ký tự A./B./C./D. của đáp án đúng vẫn giữ in đậm như các lựa chọn khác.
+        // - Ruby/furigana khi xuất Word dùng Yu Mincho, cỡ 7pt, offset 1pt, alignment 1-2-1.
+        // - Chỉ vá lớp xuất Word, không đụng cloud/share/editor/tính năng khác.
+        // ==========================================
+        (function installTeacherOptionLabelAndWordRubyPatch20260612D(){
+            if (window.__teacherOptionLabelAndWordRubyPatch20260612DInstalled) return;
+            window.__teacherOptionLabelAndWordRubyPatch20260612DInstalled = true;
+
+            function stripBoldOnlyForCorrectOption20260612D(html) {
+                return String(html || '')
+                    .replace(/&lt;\/?(?:b|strong)(?:\s+[^&]*?)?&gt;/gi, '')
+                    .replace(/<\/?(?:b|strong)(?:\s+[^>]*)?>/gi, '');
+            }
+
+            renderOptionCellForExport = function(q, optionIndex, widthPercent, isAnswerKey) {
+                const correctIndex = optionLetterToIndex(q.correct);
+                const isCorrect = isAnswerKey && correctIndex === optionIndex;
+                let optionHtml = prepareInlineHtmlForExport(
+                    isAnswerKey
+                        ? stripFuriganaHtml((q.options && q.options[optionIndex]) || '')
+                        : ((q.options && q.options[optionIndex]) || '')
+                );
+
+                // Chỉ gỡ in đậm ở phần NỘI DUNG đáp án đúng, không gỡ nhãn A./B./C./D.
+                if (isCorrect) optionHtml = stripBoldOnlyForCorrectOption20260612D(optionHtml);
+
+                const textColor = isCorrect ? '#b91c1c' : '#000000';
+                const optionLabel = isAnswerKey ? ['A', 'B', 'C', 'D'][optionIndex] : String(optionIndex + 1);
+                const labelHtml = `<b>${optionLabel}.</b>`;
+
+                return "<td style='width:" + widthPercent + "%; border:none !important; padding:0 5px 0 0; vertical-align:top;'>" +
+                       "<p style='margin-top:0pt; margin-bottom:0pt; line-height:1.3; color:" + textColor + "; font-weight:400;'>" + labelHtml + " " + optionHtml + "</p>" +
+                       "</td>";
+            };
+
+            normalizeRubyForWordExportHtml = function(html) {
+                const holder = document.createElement('div');
+                holder.innerHTML = String(html || '');
+
+                holder.querySelectorAll('ruby').forEach(ruby => {
+                    let rt = ruby.querySelector('rt');
+                    const reading = (ruby.getAttribute('data-reading') || (rt ? rt.textContent : '') || '').trim();
+                    const base = (ruby.getAttribute('data-base') || Array.from(ruby.childNodes).filter(n => {
+                        return !(n.nodeType === Node.ELEMENT_NODE && ['RT', 'RP'].includes(n.nodeName));
+                    }).map(n => n.textContent || '').join('') || (ruby.textContent || '').replace(reading, '')).trim();
+
+                    if (!base) return;
+
+                    ruby.className = 'furigana-ruby word-ruby-121';
+                    ruby.setAttribute('data-base', base);
+                    ruby.setAttribute('data-reading', reading);
+                    ruby.setAttribute('style', [
+                        "font-family:'Yu Mincho','MS Mincho',serif",
+                        "ruby-position:over",
+                        "ruby-align:distribute-space",
+                        "mso-ruby-position:above",
+                        "mso-ruby-align:distribute-space",
+                        "mso-font-charset:128"
+                    ].join(';') + ';');
+
+                    while (ruby.firstChild) ruby.removeChild(ruby.firstChild);
+
+                    const rb = document.createElement('rb');
+                    rb.textContent = base;
+                    rb.setAttribute('style', "font-family:'Yu Mincho','MS Mincho',serif; font-weight:inherit; mso-font-charset:128;");
+                    ruby.appendChild(rb);
+
+                    const rpOpen = document.createElement('rp');
+                    rpOpen.textContent = '(';
+                    ruby.appendChild(rpOpen);
+
+                    rt = document.createElement('rt');
+                    rt.textContent = reading;
+                    rt.setAttribute('style', [
+                        "font-family:'Yu Mincho','MS Mincho',serif",
+                        "font-size:7pt",
+                        "color:#000000",
+                        "font-weight:400",
+                        "mso-text-raise:1pt",
+                        "line-height:1",
+                        "mso-line-height-alt:1pt",
+                        "mso-font-kerning:0pt",
+                        "mso-font-charset:128"
+                    ].join(';') + ';');
+                    ruby.appendChild(rt);
+
+                    const rpClose = document.createElement('rp');
+                    rpClose.textContent = ')';
+                    ruby.appendChild(rpClose);
+                });
+
+                return holder.innerHTML;
+            };
+
+            const previousGenerateHtmlForPrintOrExport20260612D = generateHtmlForPrintOrExport;
+            generateHtmlForPrintOrExport = function(isAnswerKey, addPartTitles = false, forWordDoc = true, includeAnswerExplanationTable = false, exportOptions = {}) {
+                let html = previousGenerateHtmlForPrintOrExport20260612D.apply(this, arguments);
+                const oldRubyCss = "ruby.furigana-ruby, ruby { ruby-align:distribute-space; mso-ruby-position:above; mso-ruby-align:distribute-space; } ruby.furigana-ruby rt, ruby rt { font-family:'Yu Mincho','MS Mincho',serif; font-size:7pt; color:#000000; font-weight:400; mso-text-raise:0pt; line-height:1; mso-font-kerning:0pt; }";
+                const newRubyCss = "ruby.furigana-ruby, ruby { font-family:'Yu Mincho','MS Mincho',serif; ruby-position:over; ruby-align:distribute-space; mso-ruby-position:above; mso-ruby-align:distribute-space; mso-font-charset:128; } ruby.furigana-ruby rb, ruby rb { font-family:'Yu Mincho','MS Mincho',serif; font-weight:inherit; mso-font-charset:128; } ruby.furigana-ruby rt, ruby rt { font-family:'Yu Mincho','MS Mincho',serif; font-size:7pt; color:#000000; font-weight:400; mso-text-raise:1pt; line-height:1; mso-line-height-alt:1pt; mso-font-kerning:0pt; mso-font-charset:128; }";
+                html = String(html || '').split(oldRubyCss).join(newRubyCss);
+                return html;
+            };
+        })();
+
+
+        // ==========================================
     </script>
 </body>
 </html>
